@@ -3,225 +3,148 @@ import cv2
 import numpy as np
 import pandas as pd
 
-# --- Page Config ---
-st.set_page_config(page_title="Bio-Image Quantifier: Extraction", layout="wide")
+st.set_page_config(page_title="Bio-Image Quantifier: Diagnostic", layout="wide")
 
 if "analysis_history" not in st.session_state:
     st.session_state.analysis_history = []
 
-st.title("🔬 Bio-Image Quantifier: Extraction Engine")
-st.caption("Full-Spec Analysis Pipeline. (No Graphing / CSV Export Only)")
+st.title("🔬 Bio-Image Quantifier: Diagnostic Edition")
+st.caption("Debug Mode Enabled: Adjust sliders until you see the masks clearly.")
 
-# --- Constants (Full Spec / High Sensitivity) ---
+# --- Constants ---
 DEFAULT_HUE = {
-    "Red_Low": (0, 35),      # Covers up to Yellow
-    "Red_High": (170, 180),  
-    "Green": (25, 95),       # Covers down to Yellow
-    "Blue": (90, 150),       
-    "Brown": (0, 40)         
+    "Red_Low": (0, 35), "Red_High": (170, 180),  
+    "Green": (25, 95), "Blue": (90, 150), "Brown": (0, 40)         
 }
-COLORS = ["Brown (DAB)", "Green (GFP)", "Red (RFP)", "Blue (DAPI)"]
+COLORS = ["Red (RFP)", "Green (GFP)", "Blue (DAPI)", "Brown (DAB)"]
 
-# --- Sidebar (Full Spec) ---
+# --- Sidebar ---
 with st.sidebar:
-    st.header("Analysis Recipe")
+    st.header("1. Tuning Panel")
     
-    show_mask = st.checkbox("🛠 Show Binary Mask", value=False)
-
-    with st.expander("🎨 Color Calibration (HSV)", expanded=True):
+    # Global Calibration
+    with st.expander("🎨 Color Definitions (HSV)", expanded=True):
         h_red_l = st.slider("Red (Low)", 0, 50, DEFAULT_HUE["Red_Low"])
         h_red_h = st.slider("Red (High)", 150, 180, DEFAULT_HUE["Red_High"])
-        h_green = st.slider("Green (GFP)", 15, 120, DEFAULT_HUE["Green"])
-        h_blue = st.slider("Blue (DAPI)", 80, 170, DEFAULT_HUE["Blue"])
-        h_brown = st.slider("Brown (DAB)", 0, 60, DEFAULT_HUE["Brown"])
+        h_green = st.slider("Green", 15, 120, DEFAULT_HUE["Green"])
+        h_blue = st.slider("Blue", 80, 170, DEFAULT_HUE["Blue"])
+        h_brown = st.slider("Brown", 0, 60, DEFAULT_HUE["Brown"])
 
-    mode = st.selectbox("Analysis Mode:", [
-        "1. Area Fraction (Single Color)",
-        "2. Cell Count (Nuclei)",
-        "3. Colocalization (General)",
-        "4. Spatial Distance",
-        "5. Ratio Trend Analysis"
-    ])
+    mode = st.selectbox("Mode:", ["Colocalization (%)", "Area Fraction (%)", "Cell Count"])
+    
     st.divider()
-
-    # Variable Initialization
-    target_a, target_b = "Blue (DAPI)", "Red (RFP)"
-    sens_a, sens_b = 30, 30 
-    bright_a, bright_b = 30, 30 
-    sens_common, bright_common = 30, 30
-    min_size, bright_count = 50, 50
-    sample_group = "Control"
-    ratio_val = 0
-    trend_metric = ""
-
-    # Mode 5 Logic (Crucial for Ratio Analysis)
-    if mode.startswith("5."):
-        st.markdown("### 🔢 Trend Conditions")
-        trend_metric = st.radio("Metric:", ["Colocalization Rate", "Area Fraction"])
-        ratio_val = st.number_input("Sort Value (Ratio/Conc):", value=0, step=10)
-        ratio_label = st.text_input("Label (e.g., 160:40):", value=f"{ratio_val}%")
-        sample_group = ratio_label 
+    
+    # Specific Settings for Colocalization
+    if mode == "Colocalization (%)":
+        st.markdown("### 🛠 Debugging")
+        view_mode = st.radio("Show View:", ["Result (Overlay)", "Check Mask A (Base)", "Check Mask B (Target)"])
+        
         st.divider()
-        st.markdown("#### Parameters")
-        if trend_metric == "Colocalization Rate":
-            c1, c2 = st.columns(2)
-            with c1:
-                target_a = st.selectbox("CH-A (Base):", COLORS, index=3, key="m5_ta") 
-                sens_a = st.slider("A Sens", 5, 50, 30, key="m5_sa")
-                bright_a = st.slider("A Bright", 0, 255, 30, key="m5_ba")
-            with c2:
-                target_b = st.selectbox("CH-B (Target):", COLORS, index=2, key="m5_tb") 
-                sens_b = st.slider("B Sens", 5, 50, 30, key="m5_sb")
-                bright_b = st.slider("B Bright", 0, 255, 60, key="m5_bb")
-        else:
-            target_a = st.selectbox("Target Color:", COLORS, index=2, key="m5_ta_area")
-            sens_a = st.slider("Sensitivity", 5, 50, 30, key="m5_sa_area")
-            bright_a = st.slider("Brightness", 0, 255, 60, key="m5_ba_area")
-    else:
-        sample_group = st.text_input("Group Name (e.g., Control):", value="Control")
-        st.divider()
-        if mode.startswith("1."):
-            target_a = st.selectbox("Target Color:", COLORS, index=2)
-            sens_a = st.slider("Sensitivity", 5, 50, 30)
-            bright_a = st.slider("Brightness", 0, 255, 60)
-        elif mode.startswith("2."):
-            min_size = st.slider("Min Size (px)", 10, 500, 50)
-            bright_count = st.slider("Brightness Threshold", 0, 255, 50)
-        elif mode.startswith("3."):
-            c1, c2 = st.columns(2)
-            with c1:
-                target_a = st.selectbox("CH-A (Base):", COLORS, index=3)
-                sens_a = st.slider("A Sens", 5, 50, 30)
-                bright_a = st.slider("A Bright", 0, 255, 30)
-            with c2:
-                target_b = st.selectbox("CH-B (Target):", COLORS, index=2)
-                sens_b = st.slider("B Sens", 5, 50, 30)
-                bright_b = st.slider("B Bright", 0, 255, 60)
-        elif mode.startswith("4."):
-            target_a = st.selectbox("Point A:", COLORS, index=3)
-            target_b = st.selectbox("Point B:", COLORS, index=2)
-            sens_common = st.slider("Color Sens", 5, 50, 30)
-            bright_common = st.slider("Brightness", 0, 255, 60)
+        c1, c2 = st.columns(2)
+        target_a = c1.selectbox("Base (A):", COLORS, index=2) # Blue default
+        target_b = c2.selectbox("Target (B):", COLORS, index=0) # Red default
+        
+        st.caption("⬇️ **Lower these if detection is 0%**")
+        bright_a = c1.slider("Bright A", 0, 255, 20) # Low default
+        bright_b = c2.slider("Bright B", 0, 255, 20) # Low default
+        sens_a = c1.slider("Sens A", 5, 50, 40) # High sens default
+        sens_b = c2.slider("Sens B", 5, 50, 40) # High sens default
 
-    if st.button("🗑 Clear All Data"):
+    elif mode == "Area Fraction (%)":
+        target_a = st.selectbox("Target:", COLORS, index=0)
+        sens_a = st.slider("Sens", 5, 50, 40)
+        bright_a = st.slider("Bright", 0, 255, 20)
+        view_mode = "Result (Overlay)"
+        
+    else: # Count
+        bright_count = st.slider("Threshold", 0, 255, 40)
+        min_size = st.slider("Min Size", 0, 500, 20)
+        view_mode = "Result (Overlay)"
+
+    if st.button("🗑 Reset"):
         st.session_state.analysis_history = []
         st.rerun()
 
-# --- Logic Functions ---
-def get_mask_dynamic(hsv_img, color_name, sens, bright_min):
-    min_saturation = max(0, 40 - sens) # High sensitivity logic
-    h, s, v = cv2.split(hsv_img)
-    _, v_mask = cv2.threshold(v, bright_min, 255, cv2.THRESH_BINARY)
-    color_mask = np.zeros_like(v_mask)
+# --- Logic ---
+def get_mask(hsv, color, s, b):
+    min_sat = max(0, 40 - s)
+    _, v = cv2.threshold(hsv[:,:,2], b, 255, cv2.THRESH_BINARY)
     
-    if "Red" in color_name:
-        l1, h1 = h_red_l; l2, h2 = h_red_h
-        color_mask = cv2.inRange(hsv_img, np.array([l1, min_saturation, 0]), np.array([h1, 255, 255])) | \
-                     cv2.inRange(hsv_img, np.array([l2, min_saturation, 0]), np.array([h2, 255, 255]))
-    elif "Green" in color_name:
-        l, h = h_green
-        color_mask = cv2.inRange(hsv_img, np.array([l, min_saturation, 0]), np.array([h, 255, 255]))
-    elif "Blue" in color_name:
-        l, h = h_blue
-        color_mask = cv2.inRange(hsv_img, np.array([l, min_saturation, 0]), np.array([h, 255, 255]))
-    elif "Brown" in color_name:
-        l, h = h_brown
-        color_mask = cv2.inRange(hsv_img, np.array([l, min_saturation, 0]), np.array([h, 255, 255]))
-        
-    return cv2.bitwise_and(color_mask, v_mask)
+    mask = np.zeros_like(v)
+    if "Red" in color:
+        mask = cv2.inRange(hsv, (h_red_l[0], min_sat, 0), (h_red_l[1], 255, 255)) | \
+               cv2.inRange(hsv, (h_red_h[0], min_sat, 0), (h_red_h[1], 255, 255))
+    elif "Green" in color: mask = cv2.inRange(hsv, (h_green[0], min_sat, 0), (h_green[1], 255, 255))
+    elif "Blue" in color: mask = cv2.inRange(hsv, (h_blue[0], min_sat, 0), (h_blue[1], 255, 255))
+    elif "Brown" in color: mask = cv2.inRange(hsv, (h_brown[0], min_sat, 0), (h_brown[1], 255, 255))
+    return cv2.bitwise_and(mask, v)
 
-def get_centroids(mask):
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    pts = []
-    for c in cnts:
-        M = cv2.moments(c)
-        if M["m00"] != 0: pts.append(np.array([M["m10"]/M["m00"], M["m01"]/M["m00"]]))
-    return pts
-
-# --- Main Processing ---
-uploaded_files = st.file_uploader("Upload Images (Batch Processing)", type=["jpg", "png", "tif"], accept_multiple_files=True)
+# --- Main ---
+uploaded_files = st.file_uploader("Upload Images", type=["jpg", "png", "tif"], accept_multiple_files=True)
 
 if uploaded_files:
-    st.success(f"Loaded {len(uploaded_files)} images. Analyzing...")
-    batch_results = []
-    for i, file in enumerate(uploaded_files):
-        file.seek(0)
-        file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-        img_bgr = cv2.imdecode(file_bytes, 1)
-        if img_bgr is not None:
-            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-            img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-            val, unit, res_display = 0.0, "", img_rgb.copy()
-            
-            is_area = "Area" in mode or (mode.startswith("5.") and "Area" in trend_metric)
-            is_count = "Count" in mode
-            is_coloc = "Colocalization" in mode or (mode.startswith("5.") and "Colocalization" in trend_metric)
-            is_dist = "Distance" in mode
-
-            if is_area:
-                mask = get_mask_dynamic(img_hsv, target_a, sens_a, bright_a)
-                val = (cv2.countNonZero(mask) / (img_rgb.shape[0] * img_rgb.shape[1])) * 100
-                unit = "% Area"
-                res_display = mask
-                if show_mask: res_display = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
-            elif is_count:
-                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-                _, th = cv2.threshold(gray, bright_count, 255, cv2.THRESH_BINARY)
-                _, otsu = cv2.threshold(cv2.GaussianBlur(gray,(5,5),0), 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-                final = cv2.bitwise_and(th, otsu)
-                cnts, _ = cv2.findContours(final, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                valid = [c for c in cnts if cv2.contourArea(c) > min_size]
-                val, unit = len(valid), "cells"
-                cv2.drawContours(res_display, valid, -1, (0,255,0), 2)
-            elif is_coloc:
-                mask_a = get_mask_dynamic(img_hsv, target_a, sens_a, bright_a)
-                mask_b = get_mask_dynamic(img_hsv, target_b, sens_b, bright_b)
-                coloc = cv2.bitwise_and(mask_a, mask_b)
-                denom = cv2.countNonZero(mask_a)
-                val = (cv2.countNonZero(coloc) / denom * 100) if denom > 0 else 0
-                unit = "% Coloc"
-                res_display = cv2.merge([np.zeros_like(mask_a), mask_a, mask_b]) if not show_mask else cv2.merge([np.zeros_like(mask_a), mask_a, mask_b])
-            elif is_dist:
-                mask_a = get_mask_dynamic(img_hsv, target_a, sens_common, bright_common)
-                mask_b = get_mask_dynamic(img_hsv, target_b, sens_common, bright_common)
-                pts_a, pts_b = get_centroids(mask_a), get_centroids(mask_b)
-                if pts_a and pts_b:
-                    val = np.mean([np.min([np.linalg.norm(pa - pb) for pb in pts_b]) for pa in pts_a])
-                else: val = 0
-                unit = "px Dist"
-                res_display = cv2.addWeighted(img_rgb, 0.6, cv2.merge([np.zeros_like(mask_a), mask_a, mask_b]), 0.4, 0)
-            
-            if unit == "": unit = "(No Unit)"
-            batch_results.append({
-                "Group": sample_group, "Value": val, "Unit": unit,
-                "Is_Trend": mode.startswith("5."), "Ratio_Value": ratio_val if mode.startswith("5.") else 0
-            })
-            with st.expander(f"📷 Img {i+1}: {val:.2f} {unit}", expanded=True):
-                c1, c2 = st.columns(2)
-                c1.image(img_rgb, caption="Original", use_container_width=True)
-                c2.image(res_display, caption="Analyzed", use_container_width=True)
-
-    if st.button(f"📥 Add {len(batch_results)} results to Dataset", type="primary"):
-        st.session_state.analysis_history.extend(batch_results)
-        st.success(f"✅ Data added to '{sample_group}'")
-
-# --- Export Section (No Graphing) ---
-if st.session_state.analysis_history:
-    st.divider()
-    st.header("💾 Data Export")
-    df = pd.DataFrame(st.session_state.analysis_history)
-    
-    # Sort logic specifically for your Trend Analysis mode
-    if df["Is_Trend"].any(): 
-        df = df.sort_values(by="Ratio_Value")
+    batch = []
+    for f in uploaded_files:
+        f.seek(0)
+        img = cv2.imdecode(np.frombuffer(f.read(), np.uint8), 1)
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        val, unit = 0, ""
+        disp = rgb.copy()
         
-    st.dataframe(df)
-    
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download CSV for Graphing",
-        data=csv,
-        file_name="quantified_data.csv",
-        mime="text/csv",
-        type="primary"
-    )
+        if mode == "Colocalization (%)":
+            m1 = get_mask(hsv, target_a, sens_a, bright_a) # Base
+            m2 = get_mask(hsv, target_b, sens_b, bright_b) # Target
+            
+            inter = cv2.bitwise_and(m1, m2)
+            denom = cv2.countNonZero(m1)
+            val = (cv2.countNonZero(inter)/denom*100) if denom > 0 else 0.0
+            unit = "% Coloc"
+            
+            # Debug Views
+            if view_mode == "Check Mask A (Base)":
+                disp = cv2.cvtColor(m1, cv2.COLOR_GRAY2RGB) # Show White Mask
+            elif view_mode == "Check Mask B (Target)":
+                disp = cv2.cvtColor(m2, cv2.COLOR_GRAY2RGB) # Show White Mask
+            else:
+                # Result View: Red(Base) + Green(Target) = Yellow(Overlap)
+                z = np.zeros_like(m1)
+                # Assign colors roughly to match logic (Red=Ch1, Green=Ch2)
+                disp = cv2.merge([z, m2, m1]) # R=m1, G=m2 (OpenCV is BGR, Streamlit reads as RGB... trickery here)
+                # Let's stick to explicit:
+                # We want overlap to be Yellow (R+G).
+                # If m1 is Red component, m2 is Green component.
+                # Create true RGB composition
+                comp = np.zeros_like(rgb)
+                comp[:,:,0] = m1 # Red Channel
+                comp[:,:,1] = m2 # Green Channel
+                disp = comp
+
+        elif mode == "Area Fraction (%)":
+            m = get_mask(hsv, target_a, sens_a, bright_a)
+            val = (cv2.countNonZero(m)/m.size)*100
+            unit = "% Area"
+            disp = cv2.addWeighted(rgb, 0.5, cv2.cvtColor(m, cv2.COLOR_GRAY2RGB), 0.5, 0)
+            # Make mask Green for visibility
+            mask_rgb = np.zeros_like(rgb); mask_rgb[:,:,1] = m
+            disp = cv2.addWeighted(rgb, 0.7, mask_rgb, 0.5, 0)
+
+        elif mode == "Cell Count":
+             # Simplified for demo
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            _, th = cv2.threshold(gray, bright_count, 255, cv2.THRESH_BINARY)
+            cnts, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            valid = [c for c in cnts if cv2.contourArea(c) > min_size]
+            val, unit = len(valid), "cells"
+            cv2.drawContours(disp, valid, -1, (0,255,0), 2)
+
+        batch.append({"Group": "Test", "Value": val, "Unit": unit})
+        
+        with st.expander(f"Result: {val:.2f} {unit}", expanded=True):
+            c1, c2 = st.columns(2)
+            c1.image(rgb, caption="Original")
+            c2.image(disp, caption=f"View: {view_mode}")
+
+    if st.button("Download CSV"):
+        df = pd.DataFrame(batch)
+        st.download_button("Get CSV", df.to_csv(index=False).encode('utf-8'), "data.csv")
