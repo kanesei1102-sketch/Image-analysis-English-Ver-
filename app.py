@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-# グラフ描画ライブラリ（altair, matplotlib, seaborn）のインポートを削除
+# Graph libraries (altair, matplotlib, seaborn) imports are removed
 
 st.set_page_config(page_title="Bio-Image Quantifier Pro (Extraction Only)", layout="wide")
 
@@ -11,19 +11,19 @@ if "analysis_history" not in st.session_state:
     st.session_state.analysis_history = []
 
 st.title("🔬 Bio-Image Quantifier: Pro Edition (Extraction)")
-st.caption("2025年最終版：解析・データ抽出専用（グラフ機能なし）")
+st.caption("2025 Final Ver: Analysis & Extraction Only (No Graphing)")
 
-# --- 色定義 ---
+# --- Color Definitions (Translated) ---
 COLOR_MAP = {
-    "茶色 (DAB)": {"lower": np.array([10, 50, 20]), "upper": np.array([30, 255, 255])},
-    "緑 (GFP)": {"lower": np.array([35, 50, 50]), "upper": np.array([85, 255, 255])},
-    "赤 (RFP)": {"lower": np.array([0, 50, 50]), "upper": np.array([10, 255, 255])},
-    "青 (DAPI)": {"lower": np.array([100, 50, 50]), "upper": np.array([140, 255, 255])}
+    "Brown (DAB)": {"lower": np.array([10, 50, 20]), "upper": np.array([30, 255, 255])},
+    "Green (GFP)": {"lower": np.array([35, 50, 50]), "upper": np.array([85, 255, 255])},
+    "Red (RFP)":   {"lower": np.array([0, 50, 50]), "upper": np.array([10, 255, 255])},
+    "Blue (DAPI)": {"lower": np.array([100, 50, 50]), "upper": np.array([140, 255, 255])}
 }
 
-# --- 関数群 ---
+# --- Functions ---
 def get_mask(hsv_img, color_name, sens, bright_min):
-    if color_name == "赤 (RFP)":
+    if color_name == "Red (RFP)":
         lower1 = np.array([0, 30, bright_min])
         upper1 = np.array([10 + sens//2, 255, 255])
         lower2 = np.array([170 - sens//2, 30, bright_min])
@@ -45,75 +45,75 @@ def get_centroids(mask):
             pts.append(np.array([M["m10"]/M["m00"], M["m01"]/M["m00"]]))
     return pts
 
-# --- サイドバー ---
+# --- Sidebar ---
 with st.sidebar:
     st.header("Analysis Recipe")
-    mode = st.selectbox("解析モードを選択:", [
-        "1. 単色面積率 (Area)",
-        "2. 細胞核カウント (Count)",
-        "3. 汎用共局在解析 (Colocalization)",
-        "4. 汎用空間距離解析 (Spatial Distance)",
-        "5. 割合トレンド解析 (Ratio Analysis)"
+    mode = st.selectbox("Select Analysis Mode:", [
+        "1. Area Fraction (Area)",
+        "2. Cell Count (Count)",
+        "3. Colocalization (Colocalization)",
+        "4. Spatial Distance (Spatial Distance)",
+        "5. Ratio Trend Analysis (Ratio Analysis)"
     ])
     st.divider()
 
-    if mode == "5. 割合トレンド解析 (Ratio Analysis)":
-        st.markdown("### 🔢 条件設定 (Batch)")
-        trend_metric = st.radio("測定対象:", ["共局在率 (Colocalization)", "面積率 (Area)"])
-        ratio_val = st.number_input("今回の数値条件 (割合/濃度):", value=0, step=10)
-        ratio_unit = st.text_input("単位:", value="%", key="unit")
+    if mode == "5. Ratio Trend Analysis (Ratio Analysis)":
+        st.markdown("### 🔢 Batch Conditions")
+        trend_metric = st.radio("Metric:", ["Colocalization", "Area"])
+        ratio_val = st.number_input("Condition Value (Ratio/Conc):", value=0, step=10)
+        ratio_unit = st.text_input("Unit:", value="%", key="unit")
         sample_group = f"{ratio_val}{ratio_unit}"
-        st.info(f"ラベル: **{sample_group}**")
+        st.info(f"Label: **{sample_group}**")
         st.divider()
-        if trend_metric == "共局在率 (Colocalization)":
+        if trend_metric == "Colocalization":
             c1, c2 = st.columns(2)
             with c1:
-                target_a = st.selectbox("CH-A (基準):", list(COLOR_MAP.keys()), index=3) 
-                sens_a = st.slider("A感度", 5, 50, 20, key="t_s_a")
-                bright_a = st.slider("A輝度", 0, 255, 60, key="t_b_a")
+                target_a = st.selectbox("CH-A (Base):", list(COLOR_MAP.keys()), index=3) 
+                sens_a = st.slider("Sens A", 5, 50, 20, key="t_s_a")
+                bright_a = st.slider("Bright A", 0, 255, 60, key="t_b_a")
             with c2:
-                target_b = st.selectbox("CH-B (対象):", list(COLOR_MAP.keys()), index=2) 
-                sens_b = st.slider("B感度", 5, 50, 20, key="t_s_b")
-                bright_b = st.slider("B輝度", 0, 255, 60, key="t_b_b")
+                target_b = st.selectbox("CH-B (Target):", list(COLOR_MAP.keys()), index=2) 
+                sens_b = st.slider("Sens B", 5, 50, 20, key="t_s_b")
+                bright_b = st.slider("Bright B", 0, 255, 60, key="t_b_b")
         else:
-            target_a = st.selectbox("解析色:", list(COLOR_MAP.keys()), index=2)
-            sens_a = st.slider("感度", 5, 50, 20, key="t_s_a")
-            bright_a = st.slider("輝度", 0, 255, 60, key="t_b_a")
+            target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()), index=2)
+            sens_a = st.slider("Sensitivity", 5, 50, 20, key="t_s_a")
+            bright_a = st.slider("Brightness", 0, 255, 60, key="t_b_a")
     else:
-        sample_group = st.text_input("グループ名 (X軸):", value="Control")
+        sample_group = st.text_input("Group Name (X-axis):", value="Control")
         st.divider()
-        if mode == "1. 単色面積率 (Area)":
-            target_a = st.selectbox("解析色:", list(COLOR_MAP.keys()))
-            sens_a = st.slider("感度", 5, 50, 20)
-            bright_a = st.slider("輝度", 0, 255, 60)
-        elif mode == "2. 細胞核カウント (Count)":
-            min_size = st.slider("最小サイズ(px)", 10, 500, 50)
-            bright_count = st.slider("輝度しきい値", 0, 255, 50)
-        elif mode == "3. 汎用共局在解析 (Colocalization)":
+        if mode == "1. Area Fraction (Area)":
+            target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()))
+            sens_a = st.slider("Sensitivity", 5, 50, 20)
+            bright_a = st.slider("Brightness", 0, 255, 60)
+        elif mode == "2. Cell Count (Count)":
+            min_size = st.slider("Min Size (px)", 10, 500, 50)
+            bright_count = st.slider("Brightness Threshold", 0, 255, 50)
+        elif mode == "3. Colocalization (Colocalization)":
             c1, c2 = st.columns(2)
             with c1:
-                target_a = st.selectbox("CH-A (基準):", list(COLOR_MAP.keys()), index=3)
-                sens_a = st.slider("A感度", 5, 50, 20)
-                bright_a = st.slider("A輝度", 0, 255, 60)
+                target_a = st.selectbox("CH-A (Base):", list(COLOR_MAP.keys()), index=3)
+                sens_a = st.slider("Sens A", 5, 50, 20)
+                bright_a = st.slider("Bright A", 0, 255, 60)
             with c2:
-                target_b = st.selectbox("CH-B (対象):", list(COLOR_MAP.keys()), index=2)
-                sens_b = st.slider("B感度", 5, 50, 20)
-                bright_b = st.slider("B輝度", 0, 255, 60)
-        elif mode == "4. 汎用空間距離解析 (Spatial Distance)":
-            target_a = st.selectbox("起点A:", list(COLOR_MAP.keys()), index=2)
-            target_b = st.selectbox("対象B:", list(COLOR_MAP.keys()), index=3)
-            sens_common = st.slider("色感度", 5, 50, 20)
-            bright_common = st.slider("輝度", 0, 255, 60)
+                target_b = st.selectbox("CH-B (Target):", list(COLOR_MAP.keys()), index=2)
+                sens_b = st.slider("Sens B", 5, 50, 20)
+                bright_b = st.slider("Bright B", 0, 255, 60)
+        elif mode == "4. Spatial Distance (Spatial Distance)":
+            target_a = st.selectbox("Point A:", list(COLOR_MAP.keys()), index=2)
+            target_b = st.selectbox("Point B:", list(COLOR_MAP.keys()), index=3)
+            sens_common = st.slider("Color Sens", 5, 50, 20)
+            bright_common = st.slider("Brightness", 0, 255, 60)
 
-    if st.button("履歴を全消去"):
+    if st.button("Clear All History"):
         st.session_state.analysis_history = []
         st.rerun()
 
-# --- メインエリア ---
-uploaded_files = st.file_uploader("画像をまとめてアップロード", type=["jpg", "png", "tif"], accept_multiple_files=True)
+# --- Main Area ---
+uploaded_files = st.file_uploader("Upload Images (Batch)", type=["jpg", "png", "tif"], accept_multiple_files=True)
 
 if uploaded_files:
-    st.success(f"{len(uploaded_files)} 枚の画像を解析中...")
+    st.success(f"Processing {len(uploaded_files)} images...")
     batch_results = []
     
     for i, file in enumerate(uploaded_files):
@@ -128,13 +128,13 @@ if uploaded_files:
             val, unit = 0.0, ""
             res_display = img_rgb.copy()
             
-            # --- 解析ロジック ---
-            if mode == "1. 単色面積率 (Area)" or (mode.startswith("5.") and trend_metric == "面積率 (Area)"):
+            # --- Analysis Logic ---
+            if mode == "1. Area Fraction (Area)" or (mode.startswith("5.") and trend_metric == "Area"):
                 mask = get_mask(img_hsv, target_a, sens_a, bright_a)
                 val = (cv2.countNonZero(mask) / (img_rgb.shape[0] * img_rgb.shape[1])) * 100
                 unit = f"% Area"
                 res_display = mask
-            elif mode == "2. 細胞核カウント (Count)":
+            elif mode == "2. Cell Count (Count)":
                 gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
                 _, th = cv2.threshold(gray, bright_count, 255, cv2.THRESH_BINARY)
                 blur = cv2.GaussianBlur(gray, (5,5), 0)
@@ -144,7 +144,7 @@ if uploaded_files:
                 valid = [c for c in cnts if cv2.contourArea(c) > min_size]
                 val, unit = len(valid), "cells"
                 cv2.drawContours(res_display, valid, -1, (0,255,0), 2)
-            elif mode == "3. 汎用共局在解析 (Colocalization)" or (mode.startswith("5.") and trend_metric == "共局在率 (Colocalization)"):
+            elif mode == "3. Colocalization (Colocalization)" or (mode.startswith("5.") and trend_metric == "Colocalization"):
                 mask_a = get_mask(img_hsv, target_a, sens_a, bright_a)
                 mask_b = get_mask(img_hsv, target_b, sens_b, bright_b)
                 coloc = cv2.bitwise_and(mask_a, mask_b)
@@ -152,7 +152,7 @@ if uploaded_files:
                 val = (cv2.countNonZero(coloc) / denom * 100) if denom > 0 else 0
                 unit = f"% Coloc"
                 res_display = cv2.merge([mask_b, mask_a, np.zeros_like(mask_a)])
-            elif mode == "4. 汎用空間距離解析 (Spatial Distance)":
+            elif mode == "4. Spatial Distance (Spatial Distance)":
                 mask_a = get_mask(img_hsv, target_a, sens_common, bright_common)
                 mask_b = get_mask(img_hsv, target_b, sens_common, bright_common)
                 pts_a, pts_b = get_centroids(mask_a), get_centroids(mask_b)
@@ -162,7 +162,7 @@ if uploaded_files:
                 unit = "px Dist"
                 res_display = cv2.addWeighted(img_rgb, 0.6, cv2.merge([mask_a, mask_b, np.zeros_like(mask_a)]), 0.4, 0)
             
-            # --- 0未満防止 ---
+            # --- Prevent Negative ---
             val = max(0.0, val)
 
             entry = {
@@ -174,26 +174,26 @@ if uploaded_files:
             }
             batch_results.append(entry)
             
-            # --- Expanderのタイトルを固定 ---
+            # --- Expander ---
             with st.expander(f"📷 Image {i+1}: {file.name}", expanded=True):
                 st.markdown(f"### Result: **{val:.2f} {unit}**")
                 c1, c2 = st.columns(2)
                 c1.image(img_rgb, caption="Original", use_container_width=True)
                 c2.image(res_display, caption="Analyzed", use_container_width=True)
 
-    if st.button(f"データ {len(batch_results)} 件を追加", type="primary"):
+    if st.button(f"Add {len(batch_results)} Results", type="primary"):
         st.session_state.analysis_history.extend(batch_results)
         st.rerun()
 
-# --- レポート表示セクション (データのみ) ---
+# --- Report Section (Data Only) ---
 if st.session_state.analysis_history:
     st.divider()
     st.header("💾 Data Export")
     
     df = pd.DataFrame(st.session_state.analysis_history)
-    df["Value"] = df["Value"].clip(lower=0) # 強制0補正
+    df["Value"] = df["Value"].clip(lower=0) # Force non-negative
 
-    # グラフ表示コードは完全に削除されました
+    # Graph display code was completely deleted
 
     st.dataframe(df, use_container_width=True)
-    st.download_button("📥 CSVデータを保存", df.to_csv(index=False).encode('utf-8'), "data.csv", "text/csv")
+    st.download_button("📥 Download CSV", df.to_csv(index=False).encode('utf-8'), "data.csv", "text/csv")
