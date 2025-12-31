@@ -192,17 +192,17 @@ if st.session_state.analysis_history:
     st.header("💾 Data Export")
     
     df = pd.DataFrame(st.session_state.analysis_history)
-    df["Value"] = df["Value"].clip(lower=0) # Force non-negative
+    df["Value"] = df["Value"].clip(lower=0) 
 
-    # Generate timestamped filename (e.g., quantified_data_20260106_153000.csv)
-    now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    file_name = f"quantified_data_{now}.csv"
+    # ★修正点: UTC(世界標準時)に9時間足して、日本時間(JST)にする
+    now = datetime.datetime.now() + datetime.timedelta(hours=9)
+    file_name = f"quantified_data_{now.strftime('%Y%m%d_%H%M%S')}.csv"
 
     st.dataframe(df, use_container_width=True)
     
     st.download_button(
-        label="📥 Download CSV", 
+        label="📥 Download CSV (JST Timestamp)", 
         data=df.to_csv(index=False).encode('utf-8'), 
-        file_name=file_name,  # <--- ファイル名が自動で日時付きになります
+        file_name=file_name, 
         mime="text/csv"
     )
