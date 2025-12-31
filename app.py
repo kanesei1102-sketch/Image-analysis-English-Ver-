@@ -117,18 +117,18 @@ with st.sidebar:
             Since results may vary depending on lighting conditions and user settings, 
             final interpretations should be made by the user based on professional expertise.
             """)
-            with st.sidebar:
+        with st.sidebar:
     # --- 既存のコントロール（輝度調整など）の後に挿入 ---
-                st.divider()
-                st.caption("【Disclaimer】")
-                st.caption("""
-                This tool is intended for assistive purposes in bio-image analysis. 
-                Since results (e.g., area, intensity) may vary depending on lighting 
-                conditions, resolution, and user-defined thresholds, final scientific 
-                interpretations must be made by the user based on professional expertise. 
-                The developer is not liable for any discrepancies or research outcomes 
-                resulting from the use of this software.
-                """)
+            st.divider()
+            st.caption("【Disclaimer】")
+            st.caption("""
+            This tool is intended for assistive purposes in bio-image analysis. 
+            Since results (e.g., area, intensity) may vary depending on lighting 
+            conditions, resolution, and user-defined thresholds, final scientific 
+            interpretations must be made by the user based on professional expertise. 
+            The developer is not liable for any discrepancies or research outcomes 
+            resulting from the use of this software.
+            """)
 
 # --- Main Area ---
 uploaded_files = st.file_uploader("Upload Images (Batch)", type=["jpg", "png", "tif"], accept_multiple_files=True)
