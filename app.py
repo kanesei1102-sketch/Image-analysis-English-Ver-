@@ -109,6 +109,14 @@ with st.sidebar:
     if st.button("Clear All History"):
         st.session_state.analysis_history = []
         st.rerun()
+        with st.sidebar:
+            st.divider()
+            st.caption("【Disclaimer】")
+            st.caption("""
+            This tool is intended for assistive purposes in bio-image analysis. 
+            Since results may vary depending on lighting conditions and user settings, 
+            final interpretations should be made by the user based on professional expertise.
+            """)
 
 # --- Main Area ---
 uploaded_files = st.file_uploader("Upload Images (Batch)", type=["jpg", "png", "tif"], accept_multiple_files=True)
