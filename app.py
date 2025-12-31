@@ -2,6 +2,7 @@ import streamlit as st
 import cv2
 import numpy as np
 import pandas as pd
+import datetime
 
 # Graph libraries (altair, matplotlib, seaborn) imports are removed
 
@@ -193,7 +194,15 @@ if st.session_state.analysis_history:
     df = pd.DataFrame(st.session_state.analysis_history)
     df["Value"] = df["Value"].clip(lower=0) # Force non-negative
 
-    # Graph display code was completely deleted
+    # Generate timestamped filename (e.g., quantified_data_20260106_153000.csv)
+    now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    file_name = f"quantified_data_{now}.csv"
 
     st.dataframe(df, use_container_width=True)
-    st.download_button("📥 Download CSV", df.to_csv(index=False).encode('utf-8'), "data.csv", "text/csv")
+    
+    st.download_button(
+        label="📥 Download CSV", 
+        data=df.to_csv(index=False).encode('utf-8'), 
+        file_name=file_name,  # <--- ファイル名が自動で日時付きになります
+        mime="text/csv"
+    )
