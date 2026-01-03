@@ -99,12 +99,16 @@ st.sidebar.caption(f"Ver: {SOFTWARE_VERSION}")
 tab_main, tab_val = st.tabs(["🚀 Execute Analysis", "🏆 Validation Evidence"])
 
 with st.sidebar:
-    st.markdown("### 【Collaboration Notice】")
-    st.info("""
-    This engine is designed for high-throughput MSAT workflows.
-    For formal validation support, please contact the developer.
+    # --- STRATEGIC NOTICE: CO-AUTHORSHIP CLAIM ---
+    st.markdown("### 【Collaboration & Usage】")
+    st.warning("""
+    **Planning to publish results?**
     
-    👉 **[Contact & Feedback Form](https://forms.gle/xgNscMi3KFfWcuZ1A)**
+    This tool is currently in Beta. If you intend to use data generated here for academic publications or conference presentations, **you must contact the developer (Seiji Kaneko) in advance.**
+    
+    We will discuss **Co-authorship** or formal **Acknowledgments** based on the contribution of this tool to your research.
+    
+    👉 **[Contact Form](https://forms.gle/xgNscMi3KFfWcuZ1A)**
     """)
     st.divider()
 
@@ -156,7 +160,7 @@ with st.sidebar:
     
     if st.button("Clear History"): st.session_state.analysis_history = []; st.rerun()
 
-    # --- Parameter Export (Audit Trail) ---
+    # --- Parameter Export (Audit Trail) - COMPLETE ---
     st.divider()
     st.markdown("### ⚙️ Save Parameters (Linked)")
     
@@ -267,8 +271,8 @@ with tab_main:
                     "Group": sample_group,
                     "Value": val,
                     "Unit": unit,
-                    "Is_Trend": mode.startswith("5."),  # RESTORED for Machine Readability
-                    "Ratio_Value": ratio_val if mode.startswith("5.") else 0  # RESTORED for Numerical Analysis
+                    "Is_Trend": mode.startswith("5."),  
+                    "Ratio_Value": ratio_val if mode.startswith("5.") else 0 
                 })
         
         if st.button("Commit Batch Data", type="primary"):
@@ -308,9 +312,11 @@ with tab_val:
 
     if not df_val.empty:
         gt_map = {'C14': 14, 'C40': 40, 'C70': 70, 'C100': 100}
+        
+        # --- RESTORED: Use ALL Focus data for charts, not just W1 ---
         df_hq = df_val[(df_val['Focus'] >= 1) & (df_val['Focus'] <= 5)]
         
-        # Statistics
+        # Statistics (W1 specific)
         w1_hq = df_hq[df_hq['Channel'] == 'W1']
         avg_acc = w1_hq['Accuracy'].mean()
         df_lin = w1_hq.groupby('Ground Truth')['Value'].mean().reset_index()
@@ -323,22 +329,28 @@ with tab_val:
 
         st.divider()
 
-        # Graph 1: Linearity (Restored W2)
+        # --- RESTORED: Graph 1 with W2 (V-Shape Divergence) ---
         st.subheader("📈 1. Counting Capacity & Linearity (W1 vs W2)")
         st.info("💡 **Conclusion:** W1 (Nuclei) shows exceptionally high linearity, while W2 (Cytoplasm) clearly demonstrates **V-shaped divergence**, proving it unsuitable for counting.")
+        
         fig1, ax1 = plt.subplots(figsize=(10, 5))
         ax1.plot([0, 110], [0, 110], 'k--', alpha=0.3, label='Ideal Line')
+        # W1 Plot
         ax1.scatter(df_lin['Ground Truth'], df_lin['Value'], color='#1f77b4', s=100, label='W1 (Nuclei)', zorder=5)
+        # W2 Plot (Restored)
         w2_lin = df_hq[df_hq['Channel'] == 'W2'].groupby('Ground Truth')['Value'].mean().reset_index()
         ax1.scatter(w2_lin['Ground Truth'], w2_lin['Value'], color='#ff7f0e', s=100, marker='D', label='W2 (Cytoplasm)', zorder=5)
+        
+        # Regression Line (W1 only)
         z = np.polyfit(df_lin['Ground Truth'], df_lin['Value'], 1)
         ax1.plot(df_lin['Ground Truth'], np.poly1d(z)(df_lin['Ground Truth']), '#1f77b4', alpha=0.5, label='W1 Reg')
+        
         ax1.set_xlabel('Ground Truth'); ax1.set_ylabel('Measured Value'); ax1.legend(); ax1.grid(True, alpha=0.3)
         st.pyplot(fig1)
 
         st.divider()
 
-        # Graph 2 & 3
+        # --- RESTORED: Graph 2 & 3 (Bar Plot & Focus Decay) ---
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("📊 2. Accuracy Comparison by Density")
@@ -352,6 +364,7 @@ with tab_val:
         with c2:
             st.subheader("📉 3. Optical Robustness (Focus Decay)")
             fig3, ax3 = plt.subplots(figsize=(8, 6))
+            # Use W1 for focus decay analysis
             df_decay = df_val[df_val['Channel'] == 'W1'].copy()
             df_decay['Density'] = pd.Categorical(df_decay['Density'], categories=['C14', 'C40', 'C70', 'C100'], ordered=True)
             sns.lineplot(data=df_decay, x='Focus', y='Accuracy', hue='Density', marker='o', ax=ax3)
@@ -360,16 +373,22 @@ with tab_val:
 
         st.divider()
 
-        # Numerical Table
+        # --- RESTORED: Detailed Numerical Table ---
         st.subheader("📋 4. Validation Numerical Data Summary")
         summary = df_hq.groupby(['Density', 'Channel'])['Accuracy'].mean().unstack().reset_index()
         summary['Ground Truth'] = summary['Density'].map(gt_map)
+        # Calculate Mean Counts from Accuracy
         summary['W1 Measured'] = (summary['W1']/100)*summary['Ground Truth']
         summary['W2 Measured'] = (summary['W2']/100)*summary['Ground Truth']
+        
         summary['Density'] = pd.Categorical(summary['Density'], categories=['C14', 'C40', 'C70', 'C100'], ordered=True)
         summary = summary.sort_values('Density')
+
         st.table(summary[['Density', 'Ground Truth', 'W1', 'W1 Measured', 'W2', 'W2 Measured']].rename(columns={
-            'W1': 'W1 Accuracy(%)', 'W1 Measured': 'W1 Mean(Cells)', 'W2': 'W2 Accuracy(%)', 'W2 Measured': 'W2 Mean(Cells)'
+            'W1': 'W1 Accuracy(%)', 'W1 Measured': 'W1 Mean(Cells)',
+            'W2': 'W2 Accuracy(%)', 'W2 Measured': 'W2 Mean(Cells)'
         }))
+        
         st.info("💡 **Validation Conclusion:** W1 (Nuclei) maintains high precision across all density ranges. W2 (Cytoplasm) is scientifically unsuitable for quantification due to significant fluctuations (under/over-counting).")
-    else: st.error("Validation CSV file not found. Please place it in the repository.")
+    else:
+        st.error("Validation CSV file not found. Please place it in the repository.")
