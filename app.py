@@ -312,6 +312,7 @@ with tab_val:
     st.markdown("""
     **Validation Source:** [Broad Bioimage Benchmark Collection (BBBC005)](https://bbbc.broadinstitute.org/BBBC005)  
     **Total Verified:** 3,200 Images (C14, C40, C70, C100 × 800 images / Real Data)
+    **Methodology:** Results were obtained after **optimizing parameters (Sensitivity, Min Size) for each density group**, demonstrating the tool's maximum potential under proper calibration.
     """)
 
     # Updated Metrics based on real C100 data
