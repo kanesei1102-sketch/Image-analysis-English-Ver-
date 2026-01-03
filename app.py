@@ -18,7 +18,6 @@ if "analysis_history" not in st.session_state:
 # ---------------------------------------------------------
 # 1. Core Functions (Image Processing)
 # ---------------------------------------------------------
-# Translate keys to English for UI, logic updated accordingly
 COLOR_MAP = {
     "Brown (DAB)": {"lower": np.array([10, 50, 20]), "upper": np.array([30, 255, 255])},
     "Green (GFP)": {"lower": np.array([35, 50, 50]), "upper": np.array([85, 255, 255])},
@@ -27,7 +26,6 @@ COLOR_MAP = {
 }
 
 def get_mask(hsv_img, color_name, sens, bright_min):
-    # Updated key check for English
     if color_name == "Red (RFP)":
         lower1 = np.array([0, 30, bright_min]); upper1 = np.array([10 + sens//2, 255, 255])
         lower2 = np.array([170 - sens//2, 30, bright_min]); upper2 = np.array([180, 255, 255])
@@ -76,10 +74,8 @@ def load_validation_data():
             col = 'Image_Name' if 'Image_Name' in df.columns else 'File Name'
             for _, row in df.iterrows():
                 fname = str(row[col]); val = row['Value']
-                # Channel Detection
                 channel = 'W1' if 'w1' in fname.lower() else 'W2' if 'w2' in fname.lower() else None
                 if not channel: continue
-                # Focus Level Extraction
                 f_match = re.search(r'_F(\d+)_', fname)
                 if f_match:
                     focus = int(f_match.group(1))
@@ -94,7 +90,7 @@ def load_validation_data():
 df_val = load_validation_data()
 
 # ---------------------------------------------------------
-# 3. Main Layout & Sidebar
+# 3. Sidebar & Settings
 # ---------------------------------------------------------
 st.title("🔬 Bio-Image Quantifier: Pro Edition")
 st.caption("2026 Latest Edition: Specialized for Analysis & Data Extraction (Scale: 1.5267 μm/px)")
@@ -113,7 +109,6 @@ with st.sidebar:
     st.divider()
 
     st.header("Analysis Recipe")
-    # Modes translated to English
     mode = st.selectbox("Select Mode:", [
         "1. Single Color Area Ratio (Area)",
         "2. Cell Nuclei Count (Count)",
@@ -123,7 +118,7 @@ with st.sidebar:
     ])
     st.divider()
 
-    # --- Mode Settings ---
+    # --- Mode 5: Ratio Trend Analysis ---
     if mode == "5. Ratio Trend Analysis":
         st.markdown("### 🔢 Batch Settings")
         trend_metric = st.radio("Metric:", ["Colocalization Rate", "Area Ratio"])
@@ -146,18 +141,23 @@ with st.sidebar:
             target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()), index=2)
             sens_a = st.slider("Sensitivity", 5, 50, 20)
             bright_a = st.slider("Brightness", 0, 255, 60)
+            
+    # --- Other Modes ---
     else:
-        sample_group = st.text_input("Group Name (X-axis):", value="Control")
+        # Default values for mode 5 variables to prevent errors
+        trend_metric = None
+        ratio_val = 0
         
-        if mode == "1. Single Color Area Ratio (Area)":
+        sample_group = st.text_input("Group Name:", value="Control")
+        
+        if mode.startswith("1"): # Area
             target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()))
             sens_a = st.slider("Sensitivity", 5, 50, 20)
             bright_a = st.slider("Brightness", 0, 255, 60)
         
-        elif mode == "2. Cell Nuclei Count (Count)":
+        elif mode.startswith("2"): # Count
             min_size = st.slider("Min Size (px)", 10, 500, 50)
             bright_count = st.slider("Cell Brightness", 0, 255, 50)
-            
             use_roi_norm = st.checkbox("Calculate Density in Tissue Area (e.g. CK8)", value=True)
             if use_roi_norm:
                 st.markdown(":red[**Select the actual stain color for tissue.**]")
@@ -165,7 +165,7 @@ with st.sidebar:
                 sens_roi = st.slider("Tissue Sens", 5, 50, 20)
                 bright_roi = st.slider("Tissue Bright", 0, 255, 40)
 
-        elif mode == "3. General Colocalization Analysis":
+        elif mode.startswith("3"): # Coloc
             c1, c2 = st.columns(2)
             with c1:
                 target_a = st.selectbox("CH-A:", list(COLOR_MAP.keys()), index=3)
@@ -174,7 +174,7 @@ with st.sidebar:
                 target_b = st.selectbox("CH-B:", list(COLOR_MAP.keys()), index=2)
                 sens_b = st.slider("Sens B", 5, 50, 20); bright_b = st.slider("Bright B", 0, 255, 60)
         
-        elif mode == "4. Spatial Distance Analysis":
+        elif mode.startswith("4"): # Distance
             target_a = st.selectbox("Origin A:", list(COLOR_MAP.keys()), index=2)
             target_b = st.selectbox("Target B:", list(COLOR_MAP.keys()), index=3)
             sens_common = st.slider("Color Sens", 5, 50, 20)
@@ -194,7 +194,7 @@ with st.sidebar:
     st.caption("This tool is intended to assist with image analysis. Results may vary depending on lighting conditions and settings. The final interpretation and conclusion should be made by the user based on professional knowledge.")
 
 # ---------------------------------------------------------
-# 4. Tab 1: Analysis Execution (Full Features Preserved)
+# 4. Tab 1: Analysis Execution (Logic Fixed for Mode 5)
 # ---------------------------------------------------------
 with tab_main:
     uploaded_files = st.file_uploader("Upload Images", type=["jpg", "png", "tif"], accept_multiple_files=True)
@@ -219,8 +219,9 @@ with tab_main:
                     h, w = img_rgb.shape[:2]
                     fov_area_mm2 = (h * w) * ((scale_val / 1000) ** 2)
 
-                # --- Analysis Logic ---
-                if mode.startswith("1") or "Area Ratio" in str(mode): # Area
+                # --- 1. Area Analysis ---
+                # Check for Mode 1 OR (Mode 5 AND "Area Ratio")
+                if mode.startswith("1") or (mode.startswith("5.") and trend_metric == "Area Ratio"):
                     mask = get_mask(img_hsv, target_a, sens_a, bright_a)
                     val = (cv2.countNonZero(mask) / (img_rgb.shape[0] * img_rgb.shape[1])) * 100
                     unit = "% Area"
@@ -232,7 +233,8 @@ with tab_main:
                         real_area = fov_area_mm2 * (val / 100)
                         real_area_str = f"{real_area:.4f} mm²"
 
-                elif mode.startswith("2"): # Count
+                # --- 2. Count Analysis ---
+                elif mode.startswith("2"): 
                     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
                     _, th = cv2.threshold(gray, bright_count, 255, cv2.THRESH_BINARY)
                     blur = cv2.GaussianBlur(gray, (5,5), 0)
@@ -260,7 +262,9 @@ with tab_main:
                             density = val / fov_area_mm2
                             density_str = f"{int(density):,} cells/mm² (FOV)"
 
-                elif mode.startswith("3") or "Colocalization" in str(mode): # Coloc
+                # --- 3. Colocalization Analysis ---
+                # Check for Mode 3 OR (Mode 5 AND "Colocalization Rate")
+                elif mode.startswith("3") or (mode.startswith("5.") and trend_metric == "Colocalization Rate"):
                     mask_a = get_mask(img_hsv, target_a, sens_a, bright_a)
                     mask_b = get_mask(img_hsv, target_b, sens_b, bright_b)
                     coloc = cv2.bitwise_and(mask_a, mask_b)
@@ -269,7 +273,8 @@ with tab_main:
                     unit = "% Coloc"
                     res_display = cv2.merge([mask_b, mask_a, np.zeros_like(mask_a)])
                 
-                elif mode.startswith("4"): # Distance
+                # --- 4. Distance Analysis ---
+                elif mode.startswith("4"): 
                     mask_a = get_mask(img_hsv, target_a, sens_common, bright_common)
                     mask_b = get_mask(img_hsv, target_b, sens_common, bright_common)
                     pts_a, pts_b = get_centroids(mask_a), get_centroids(mask_b)
@@ -285,7 +290,7 @@ with tab_main:
 
                 val = max(0.0, val)
 
-                # Store Result (Includes File Name)
+                # Store Result
                 entry = {
                     "File Name": file.name,
                     "Group": sample_group,
@@ -301,8 +306,8 @@ with tab_main:
                 st.markdown(f"### 📷 Image {i+1}: {file.name}")
                 st.markdown(f"### Result: **{val:.2f} {unit}**")
                 
-                # Display extra metrics if calculated
-                if mode.startswith("1") and scale_val > 0 and 'real_area_str' in locals():
+                # Display extra metrics
+                if (mode.startswith("1") or (mode.startswith("5.") and trend_metric == "Area Ratio")) and scale_val > 0 and 'real_area_str' in locals():
                     st.metric("Actual Tissue Area", real_area_str)
                 elif mode.startswith("2") and scale_val > 0 and 'density_str' in locals():
                     st.metric("Cell Density", density_str)
@@ -332,7 +337,7 @@ with tab_main:
         st.download_button("📥 Download CSV", df.to_csv(index=False).encode('utf-8'), file_name, "text/csv")
 
 # ---------------------------------------------------------
-# 5. Tab 2: Validation Report (Full & Dynamic)
+# 5. Tab 2: Validation Report (Full Version)
 # ---------------------------------------------------------
 with tab_val:
     st.header("🏆 Performance Validation Final Report (2026 Latest)")
@@ -346,10 +351,10 @@ with tab_val:
     if not df_val.empty:
         gt_map = {'C14': 14, 'C40': 40, 'C70': 70, 'C100': 100}
         
-        # Filter for High Quality (Focus 1-5)
+        # High Quality Data Filter
         df_hq = df_val[(df_val['Focus'] >= 1) & (df_val['Focus'] <= 5)]
         
-        # W1 Stats
+        # Stats Calculation
         w1_hq = df_hq[df_hq['Channel'] == 'W1']
         avg_acc = w1_hq['Accuracy'].mean()
         df_lin = w1_hq.groupby('Ground Truth')['Value'].mean().reset_index()
@@ -368,7 +373,6 @@ with tab_val:
         fig1, ax1 = plt.subplots(figsize=(10, 4))
         ax1.plot([0, 110], [0, 110], 'k--', alpha=0.3, label='Ideal')
         ax1.scatter(df_lin['Ground Truth'], df_lin['Value'], color='#1f77b4', s=100, label='W1 (Nuclei)', zorder=5)
-        
         # W2 Plot
         w2_lin = df_hq[df_hq['Channel'] == 'W2'].groupby('Ground Truth')['Value'].mean().reset_index()
         ax1.scatter(w2_lin['Ground Truth'], w2_lin['Value'], color='#ff7f0e', s=100, marker='D', label='W2 (Cytoplasm)', zorder=5)
@@ -386,7 +390,7 @@ with tab_val:
             st.subheader("📊 2. Accuracy by Density")
             fig2, ax2 = plt.subplots(figsize=(8, 6))
             df_bar = df_hq.groupby(['Density', 'Channel'])['Accuracy'].mean().reset_index()
-            # Order Densities
+            # Order
             df_bar['Density'] = pd.Categorical(df_bar['Density'], categories=['C14', 'C40', 'C70', 'C100'], ordered=True)
             sns.barplot(data=df_bar, x='Density', y='Accuracy', hue='Channel', palette={'W1': '#1f77b4', 'W2': '#ff7f0e'}, ax=ax2)
             ax2.axhline(100, color='red', linestyle='--'); ax2.set_ylabel('Accuracy (%)')
@@ -403,14 +407,14 @@ with tab_val:
 
         st.divider()
 
-        # 4. Summary Table (Full Data W1 & W2)
+        # 4. Summary Table
         st.subheader("📋 4. Validation Data Summary Table")
         st.caption("Mean measured values at Focus Level 1-5 (High Quality Images)")
         
         summary = df_hq.groupby(['Density', 'Channel'])['Accuracy'].mean().unstack().reset_index()
         summary['Ground Truth'] = summary['Density'].map(gt_map)
         
-        # Calculate Measured Values from Accuracy
+        # Calculate Measured Values
         summary['W1 Measured'] = (summary['W1']/100)*summary['Ground Truth']
         summary['W2 Measured'] = (summary['W2']/100)*summary['Ground Truth']
         
