@@ -277,9 +277,10 @@ with tab_main:
         
         if st.button("Commit Batch Data", type="primary"):
             st.session_state.analysis_history.extend(batch_results)
-            date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')
-            st.session_state.current_analysis_id = f"AID-{date_str}-{str(uuid.uuid4())[:8]}"
-            st.rerun()
+            # ID update removed to ensure consistency with parameter download
+            st.success("Data committed to history. Please download the Parameter CSV from the sidebar now.")
+            # st.rerun() is removed or kept depending on if you want to clear the preview immediately
+            # st.rerun()
 
     if st.session_state.analysis_history:
         st.divider(); st.header("💾 CSV Export (ALCOA+ Compliant)")
