@@ -158,7 +158,13 @@ with st.sidebar:
     st.divider()
     scale_val = st.number_input("Spatial Scale (μm/px)", value=1.5267, format="%.4f")
     
-    if st.button("Clear History"): st.session_state.analysis_history = []; st.rerun()
+    # --- Reset Logic (Update ID) ---
+    if st.button("Clear History & New ID"): 
+        st.session_state.analysis_history = []
+        # ID Reset Logic
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')
+        st.session_state.current_analysis_id = f"AID-{date_str}-{str(uuid.uuid4())[:8]}"
+        st.rerun()
 
     # --- Parameter Export (Audit Trail) - COMPLETE ---
     st.divider()
