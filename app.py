@@ -230,6 +230,19 @@ with st.sidebar:
     df_params = pd.DataFrame([current_params]).T.reset_index()
     df_params.columns = ["Parameter", "Setting Value"]
     param_filename = f"params_{st.session_state.current_analysis_id}.csv"
+
+    current_active_params = {
+    "Target_A": target_a if "target_a" in locals() else "-",
+    "Sens_A": sens_a if "sens_a" in locals() else "-",
+    "Bright_A": bright_a if "bright_a" in locals() else "-",
+    "Target_B": target_b if "target_b" in locals() else "-",
+    "Sens_B": sens_b if "sens_b" in locals() else "-",
+    "Bright_B": bright_b if "bright_b" in locals() else "-",
+    "Min_Size": min_size if "min_size" in locals() else "-",
+    "Threshold": bright_count if "bright_count" in locals() else "-",
+}
+st.markdown("### ⚙️ Traceability")
+st.table(pd.DataFrame([current_active_params]).T)
     
     st.download_button("📥 Download Settings CSV", df_params.to_csv(index=False).encode('utf-8'), param_filename, "text/csv")
 
@@ -300,7 +313,7 @@ with tab_main:
                 
                 c1, c2 = st.columns(2); c1.image(img_rgb, caption="Raw"); c2.image(res_disp, caption="Analysis Result")
                 
-                batch_results.append({
+                row_data = {
                     "Software_Version": SOFTWARE_VERSION,
                     "Analysis_ID": st.session_state.current_analysis_id,
                     "Analysis_Timestamp_UTC": datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
@@ -308,9 +321,10 @@ with tab_main:
                     "Group": current_group_label,
                     "Value": val,
                     "Unit": unit,
-                    "Is_Trend": mode.startswith("5."),  
-                    "Ratio_Value": ratio_val if mode.startswith("5.") else 0 
-                })
+                }
+                row_data.update(current_active_params)
+                
+                batch_results.append(row_data)
         
         if st.button("Commit Batch Data", type="primary"):
             st.session_state.analysis_history.extend(batch_results)
@@ -318,12 +332,13 @@ with tab_main:
             st.rerun()
 
     if st.session_state.analysis_history:
-        st.divider(); st.header("💾 CSV Export")
+        st.divider()
+        st.header("💾 CSV Export (Full Traceability)")
         df_exp = pd.DataFrame(st.session_state.analysis_history)
-        cols_order = ["Analysis_ID", "Analysis_Timestamp_UTC", "Software_Version", "File Name", "Group", "Value", "Unit"]
-        cols_final = [c for c in cols_order if c in df_exp.columns]
-        st.dataframe(df_exp[cols_final], use_container_width=True)
-        utc_filename = f"quantified_data_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S')}_UTC.csv"
+        
+        st.dataframe(df_exp, use_container_width=True)
+        
+        utc_filename = f"quantified_data_{st.session_state.current_analysis_id}.csv"
         st.download_button("📥 Download Results CSV", df_exp.to_csv(index=False).encode('utf-8'), utc_filename)
 
 # ---------------------------------------------------------
