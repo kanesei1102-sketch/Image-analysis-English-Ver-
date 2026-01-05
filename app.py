@@ -293,9 +293,6 @@ with st.sidebar:
     st.markdown("### ⚙️ Traceability (Active Settings)")
     st.table(pd.DataFrame([current_active_params]).T)
     
-    # -------------------------------------------------------------------------
-    # (既存のCSVダウンロードボタン等はここから下に続きます)
-    # -------------------------------------------------------------------------
     
     st.download_button("📥 Download Settings CSV", df_params.to_csv(index=False).encode('utf-8'), param_filename, "text/csv")
 
