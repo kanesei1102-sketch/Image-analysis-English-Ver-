@@ -232,17 +232,17 @@ with st.sidebar:
     param_filename = f"params_{st.session_state.current_analysis_id}.csv"
 
     current_active_params = {
-    "Target_A": target_a if "target_a" in locals() else "-",
-    "Sens_A": sens_a if "sens_a" in locals() else "-",
-    "Bright_A": bright_a if "bright_a" in locals() else "-",
-    "Target_B": target_b if "target_b" in locals() else "-",
-    "Sens_B": sens_b if "sens_b" in locals() else "-",
-    "Bright_B": bright_b if "bright_b" in locals() else "-",
-    "Min_Size": min_size if "min_size" in locals() else "-",
-    "Threshold": bright_count if "bright_count" in locals() else "-",
-}
-st.markdown("### ⚙️ Traceability")
-st.table(pd.DataFrame([current_active_params]).T)
+        "Target_A": target_a if "target_a" in locals() else "-",
+        "Sens_A": sens_a if "sens_a" in locals() else "-",
+        "Bright_A": bright_a if "bright_a" in locals() else "-",
+        "Target_B": target_b if "target_b" in locals() else "-",
+        "Sens_B": sens_b if "sens_b" in locals() else "-",
+        "Bright_B": bright_b if "bright_b" in locals() else "-",
+        "Min_Size": min_size if "min_size" in locals() else "-",
+        "Threshold": bright_count if "bright_count" in locals() else "-",
+    }
+    st.markdown("### ⚙️ Traceability")
+    st.table(pd.DataFrame([current_active_params]).T)
     
     st.download_button("📥 Download Settings CSV", df_params.to_csv(index=False).encode('utf-8'), param_filename, "text/csv")
 
