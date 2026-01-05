@@ -231,18 +231,71 @@ with st.sidebar:
     df_params.columns = ["Parameter", "Setting Value"]
     param_filename = f"params_{st.session_state.current_analysis_id}.csv"
 
+    # -------------------------------------------------------------------------
+    # Dynamic Parameter Capture (Only save relevant params based on Mode)
+    # -------------------------------------------------------------------------
     current_active_params = {
-        "Target_A": target_a if "target_a" in locals() else "-",
-        "Sens_A": sens_a if "sens_a" in locals() else "-",
-        "Bright_A": bright_a if "bright_a" in locals() else "-",
-        "Target_B": target_b if "target_b" in locals() else "-",
-        "Sens_B": sens_b if "sens_b" in locals() else "-",
-        "Bright_B": bright_b if "bright_b" in locals() else "-",
-        "Min_Size": min_size if "min_size" in locals() else "-",
-        "Threshold": bright_count if "bright_count" in locals() else "-",
+        "Mode": mode,
+        "Scale_um_px": scale_val
     }
-    st.markdown("### ⚙️ Traceability")
+
+    # Add specific parameters based on the selected mode
+    if mode.startswith("1."): # Area Occupancy
+        current_active_params.update({
+            "Target_Color": target_a,
+            "Sensitivity": sens_a,
+            "Brightness": bright_a
+        })
+    
+    elif mode.startswith("2."): # Nuclei Count
+        current_active_params.update({
+            "Min_Size_px": min_size,
+            "Threshold": bright_count,
+            "ROI_Norm": use_roi_norm
+        })
+        if use_roi_norm:
+            current_active_params.update({
+                "ROI_Color": roi_color,
+                "ROI_Sens": sens_roi,
+                "ROI_Bright": bright_roi
+            })
+
+    elif mode.startswith("3."): # Colocalization
+        current_active_params.update({
+            "Target_A": target_a, "Sens_A": sens_a, "Bright_A": bright_a,
+            "Target_B": target_b, "Sens_B": sens_b, "Bright_B": bright_b
+        })
+
+    elif mode.startswith("4."): # Spatial Distance
+        current_active_params.update({
+            "Origin_A": target_a, 
+            "Target_B": target_b, 
+            "Common_Sens": sens_common, 
+            "Common_Bright": bright_common
+        })
+
+    elif mode.startswith("5."): # Trend Analysis
+        current_active_params.update({
+            "Trend_Metric": trend_metric,
+            "Ratio_Condition": f"{ratio_val}{ratio_unit}"
+        })
+        if trend_metric.startswith("Colocalization"):
+            current_active_params.update({
+                "Target_A": target_a, "Sens_A": sens_a, "Bright_A": bright_a,
+                "Target_B": target_b, "Sens_B": sens_b, "Bright_B": bright_b
+            })
+        else:
+            current_active_params.update({
+                "Target_Color": target_a, "Sensitivity": sens_a, "Brightness": bright_a
+            })
+
+    st.divider()
+    st.markdown("### ⚙️ Traceability (Active Settings)")
     st.table(pd.DataFrame([current_active_params]).T)
+    
+    # -------------------------------------------------------------------------
+    # (既存のCSVダウンロードボタン等はここから下に続きます)
+    # -------------------------------------------------------------------------
     
     st.download_button("📥 Download Settings CSV", df_params.to_csv(index=False).encode('utf-8'), param_filename, "text/csv")
 
