@@ -12,9 +12,7 @@ import uuid
 # 0. Page Config & Constants
 # ---------------------------------------------------------
 st.set_page_config(page_title="Bio-Image Quantifier V2 (EN)", layout="wide")
-
-# Version Management
-SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.02 (EN/Auto-Group)"
+SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.02 (UTC-Standard)"
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = str(uuid.uuid4())
@@ -22,39 +20,61 @@ if 'uploader_key' not in st.session_state:
 if "analysis_history" not in st.session_state:
     st.session_state.analysis_history = []
 
-# --- Analysis ID Management (Human readable + Unique ID) ---
+# Generate Analysis Session ID based on UTC
 if "current_analysis_id" not in st.session_state:
-    date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')
-    unique_suffix = str(uuid.uuid4())[:8]
-    st.session_state.current_analysis_id = f"AID-{date_str}-{unique_suffix}"
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    date_str = utc_now.strftime('%Y%m%d-%H%M%S') # UTC Timestamp
+    unique_suffix = str(uuid.uuid4())[:6]
+    st.session_state.current_analysis_id = f"AID-{date_str}-UTC-{unique_suffix}"
 
 # ---------------------------------------------------------
-# 1. Image Processing Engine (HE Staining & Brightfield Support)
+# 1. Image Processing Engine & Definitions
 # ---------------------------------------------------------
-# Translated Color Map Keys
+# Definition of UI display names and internal processing parameters
 COLOR_MAP = {
-    # Existing Fluorescence / IHC settings
     "Brown (DAB)": {"lower": np.array([10, 50, 20]), "upper": np.array([30, 255, 255])},
-    "Green (GFP)": {"lower": np.array([35, 50, 50]), "upper": np.array([85, 255, 255])},
+    "Green (GFP)": {"lower": np.array([35, 40, 40]), "upper": np.array([85, 255, 255])},
     "Red (RFP)": {"lower": np.array([0, 50, 50]), "upper": np.array([10, 255, 255])},
-    "Blue (DAPI)": {"lower": np.array([100, 50, 50]), "upper": np.array([140, 255, 255])},
-    
-    # --- Added: HE Staining (Brightfield) Support ---
-    # Hematoxylin (Nuclei): Purple-Blue, Darker
-    "Hematoxylin (Nuclei)": {"lower": np.array([110, 50, 50]), "upper": np.array([170, 255, 200])},
-    # Eosin (Cytoplasm): Pink-Red, Brighter
+    "Blue (DAPI)": {"lower": np.array([90, 50, 50]), "upper": np.array([140, 255, 255])},
+    "Hematoxylin (Nuclei)": {"lower": np.array([100, 50, 50]), "upper": np.array([170, 255, 200])},
     "Eosin (Cytoplasm)": {"lower": np.array([140, 20, 100]), "upper": np.array([180, 255, 255])}
 }
 
+# Clean English name conversion map for CSV headers
+CLEAN_NAMES = {
+    "Brown (DAB)": "Brown_DAB",
+    "Green (GFP)": "Green_GFP",
+    "Red (RFP)": "Red_RFP",
+    "Blue (DAPI)": "Blue_DAPI",
+    "Hematoxylin (Nuclei)": "Blue_Nuclei",
+    "Eosin (Cytoplasm)": "Pink_Cyto"
+}
+
+# Display Colors (RGB)
+DISPLAY_COLORS = {
+    "Brown (DAB)": (165, 42, 42),
+    "Green (GFP)": (0, 255, 0),
+    "Red (RFP)": (255, 0, 0),
+    "Blue (DAPI)": (0, 0, 255),
+    "Hematoxylin (Nuclei)": (0, 0, 255),
+    "Eosin (Cytoplasm)": (255, 105, 180)
+}
+
 def get_mask(hsv_img, color_name, sens, bright_min):
-    # Adjusted logic for Red wrapping in HSV
-    if color_name == "Red (RFP)":
-        lower1 = np.array([0, 30, bright_min]); upper1 = np.array([10 + sens//2, 255, 255])
-        lower2 = np.array([170 - sens//2, 30, bright_min]); upper2 = np.array([180, 255, 255])
+    conf = COLOR_MAP[color_name]
+    l = conf["lower"].copy()
+    u = conf["upper"].copy()
+    
+    # Wrap-around processing for Red hues (near 0 and 180)
+    if color_name == "Red (RFP)" or "Eosin" in color_name:
+        lower1 = np.array([0, 30, bright_min])
+        upper1 = np.array([10 + sens, 255, 255])
+        lower2 = np.array([170 - sens, 30, bright_min])
+        upper2 = np.array([180, 255, 255])
         return cv2.inRange(hsv_img, lower1, upper1) | cv2.inRange(hsv_img, lower2, upper2)
     else:
-        conf = COLOR_MAP[color_name]
-        l = np.clip(conf["lower"] - sens, 0, 255); u = np.clip(conf["upper"] + sens, 0, 255)
+        l[0] = max(0, l[0] - sens)
+        u[0] = min(180, u[0] + sens)
         l[2] = max(l[2], bright_min)
         return cv2.inRange(hsv_img, l, u)
 
@@ -74,6 +94,29 @@ def get_centroids(mask):
         M = cv2.moments(c)
         if M["m00"] != 0: pts.append(np.array([M["m10"]/M["m00"], M["m01"]/M["m00"]]))
     return pts
+
+def calc_metrics(mask, scale_val, denominator_area_mm2, min_size, clean_name):
+    """
+    Calculates various metrics from the mask and returns a dictionary prefixed with clean_name
+    """
+    px_count = cv2.countNonZero(mask)
+    area_mm2 = px_count * ((scale_val/1000)**2)
+    
+    # Particle Analysis (Counting)
+    kernel = np.ones((3,3), np.uint8)
+    mask_opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    cnts, _ = cv2.findContours(mask_opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    valid_cnts = [c for c in cnts if cv2.contourArea(c) > min_size]
+    count = len(valid_cnts)
+    
+    density = count / denominator_area_mm2 if denominator_area_mm2 > 0 else 0
+    
+    return {
+        f"{clean_name}_Area_px": px_count,
+        f"{clean_name}_Area_mm2": round(area_mm2, 6),
+        f"{clean_name}_Count": count,
+        f"{clean_name}_Density_per_mm2": round(density, 2)
+    }
 
 # ---------------------------------------------------------
 # 2. Validation Data Loading
@@ -100,324 +143,351 @@ def load_validation_data():
 df_val = load_validation_data()
 
 # ---------------------------------------------------------
-# 3. UI Framework & Sidebar
+# 3. UI Framework
 # ---------------------------------------------------------
 st.title("🔬 Bio-Image Quantifier: Pro Edition (English)")
-st.caption(f"{SOFTWARE_VERSION}: Industrial Grade Image Analysis & Data Extraction")
-
-st.sidebar.markdown(f"**Current Analysis ID:** `{st.session_state.current_analysis_id}`")
+st.caption(f"{SOFTWARE_VERSION}: UTC-Compliant Data Integrity System")
+st.sidebar.markdown(f"**Analysis ID (UTC):**\n`{st.session_state.current_analysis_id}`")
 
 tab_main, tab_val = st.tabs(["🚀 Run Analysis", "🏆 Performance Validation"])
 
 with st.sidebar:
-    st.markdown("### [Important: Publication/Conference Use]")
-    st.warning("""
-    **Are you planning to publish results?**
-    This tool is in Beta. For academic use, **please contact the developer (Kaneko) in advance.**
-    We can discuss co-authorship or acknowledgments.
-    👉 **[Contact Form](https://forms.gle/xgNscMi3KFfWcuZ1A)**
-    """)
-    st.divider()
-
     st.header("Analysis Recipe")
-    mode_raw = st.selectbox("Select Analysis Mode:", [
+    mode = st.selectbox("Select Analysis Mode:", [
         "1. Area Fraction (%)", 
         "2. Nuclei Count / Density", 
         "3. Colocalization", 
         "4. Spatial Distance Analysis", 
-        "5. Trend/Gradient Analysis"
+        "5. Trend Analysis"
     ])
-    mode = mode_raw 
 
     st.divider()
-
-    # --- Grouping Strategy ---
     st.markdown("### 🏷️ Grouping Settings")
-    group_strategy = st.radio("Labeling Strategy:", ["Manual Input", "Auto from Filename"], 
-                              help="Auto: Extracts the string before the delimiter in the filename as the group name.")
+    group_strategy = st.radio("Grouping Strategy:", ["Auto extract from filename", "Manual Input"])
     
-    if group_strategy.startswith("Manual"):
-        sample_group = st.text_input("Group Name (X-axis Label):", value="Control")
+    if group_strategy == "Manual Input":
+        sample_group = st.text_input("Group Name:", value="Control")
         filename_sep = None
     else:
-        filename_sep = st.text_input("Delimiter (e.g., _ or - ):", value="_", help="The string before this character becomes the group name.")
-        st.info(f"Example: 'WT{filename_sep}01.tif' → Group: 'WT'")
+        filename_sep = st.text_input("Delimiter (e.g., _ ):", value="_", help="Extracts string before this character as group name")
+        st.info(f"Example: '100_100.tif' → Group: '100'")
         sample_group = "(Auto Detected)" 
 
     st.divider()
 
-    # Dynamic Analysis Parameters
-    current_params_dict = {} # Dictionary to store active parameters
+    # --- Parameter Dictionary (Stores all sensitivities/brightness) ---
+    current_params_dict = {}
 
     if mode.startswith("5."):
         st.markdown("### 🔢 Trend Analysis Conditions")
         trend_metric = st.radio("Metric:", ["Colocalization Rate", "Area Fraction"])
         ratio_val = st.number_input("Condition Value:", value=0, step=10)
         ratio_unit = st.text_input("Unit:", value="%", key="unit")
-        if group_strategy.startswith("Manual"):
-            sample_group = f"{ratio_val}{ratio_unit}" 
+        current_params_dict.update({"Trend_Metric": trend_metric, "Condition_Val": ratio_val, "Condition_Unit": ratio_unit})
         
-        current_params_dict["Trend Metric"] = trend_metric
-        current_params_dict["Condition Value"] = f"{ratio_val}{ratio_unit}"
-
         if trend_metric.startswith("Colocalization"):
+            # Colocalization Settings
+            st.info("Config: **CH-A (Target)** on **CH-B (Base)**")
             c1, c2 = st.columns(2)
             with c1:
-                target_a = st.selectbox("CH-A (Base):", list(COLOR_MAP.keys()), index=3)
-                sens_a = st.slider("A Sensitivity", 5, 50, 20); bright_a = st.slider("A Brightness", 0, 255, 60)
-            with c2:
-                target_b = st.selectbox("CH-B (Target):", list(COLOR_MAP.keys()), index=2)
+                target_b = st.selectbox("CH-B (Base/Denominator):", list(COLOR_MAP.keys()), index=3)
                 sens_b = st.slider("B Sensitivity", 5, 50, 20); bright_b = st.slider("B Brightness", 0, 255, 60)
-            current_params_dict.update({"CH-A": target_a, "Sens A": sens_a, "Bright A": bright_a, "CH-B": target_b, "Sens B": sens_b, "Bright B": bright_b})
+            with c2:
+                target_a = st.selectbox("CH-A (Target/Numerator):", list(COLOR_MAP.keys()), index=1)
+                sens_a = st.slider("A Sensitivity", 5, 50, 20); bright_a = st.slider("A Brightness", 0, 255, 60)
+            
+            min_size = st.slider("Min Cell Size (px)", 10, 500, 50)
+            # [Important] Save parameters with intuitive keys
+            current_params_dict.update({
+                f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+                f"Param_{CLEAN_NAMES[target_b]}_Sens": sens_b, f"Param_{CLEAN_NAMES[target_b]}_Bright": bright_b,
+                "Param_MinSize_px": min_size
+            })
         else:
-            # ROI Normalization for Area Trend
+            # Area Settings
             target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()), index=2)
             sens_a = st.slider("Sensitivity", 5, 50, 20); bright_a = st.slider("Brightness", 0, 255, 60)
+            min_size = st.slider("Min Cell Size (px)", 10, 500, 50)
+            use_roi_norm = st.checkbox("ROI Normalization", value=False)
             
-            use_roi_norm = st.checkbox("Normalize by Tissue Area (ROI)", value=False, key="roi_mode5")
-            current_params_dict.update({"Target Color": target_a, "Sensitivity": sens_a, "Brightness": bright_a, "ROI Norm": use_roi_norm})
-            
+            current_params_dict.update({
+                f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+                "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
+            })
             if use_roi_norm:
-                roi_color = st.selectbox("Tissue Color:", list(COLOR_MAP.keys()), index=5, key="roi_col5")
-                sens_roi = st.slider("ROI Sensitivity", 5, 50, 20, key="roi_sens5")
-                bright_roi = st.slider("ROI Brightness", 0, 255, 40, key="roi_bri5")
-                current_params_dict.update({"ROI Color": roi_color, "ROI Sens": sens_roi, "ROI Bright": bright_roi})
-    else:
-        if mode.startswith("1."):
-            target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()), index=5)
-            sens_a = st.slider("Sensitivity", 5, 50, 20); bright_a = st.slider("Brightness", 0, 255, 60)
-            
-            # ROI Normalization for Area Fraction
-            use_roi_norm = st.checkbox("Normalize by Tissue Area (ROI)", value=False, key="roi_mode1")
-            current_params_dict.update({"Target Color": target_a, "Sensitivity": sens_a, "Brightness": bright_a, "ROI Norm": use_roi_norm})
-            
-            if use_roi_norm:
-                roi_color = st.selectbox("Tissue Color:", list(COLOR_MAP.keys()), index=5, key="roi_col1")
-                sens_roi = st.slider("ROI Sensitivity", 5, 50, 20, key="roi_sens1")
-                bright_roi = st.slider("ROI Brightness", 0, 255, 40, key="roi_bri1")
-                current_params_dict.update({"ROI Color": roi_color, "ROI Sens": sens_roi, "ROI Bright": bright_roi})
+                roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
+                sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
+                current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
 
-        elif mode.startswith("2."):
-            # Count Mode with Color Selection (HE support)
-            target_a = st.selectbox("Nuclei Color:", list(COLOR_MAP.keys()), index=4)
-            sens_a = st.slider("Nuclei Sensitivity", 5, 50, 20)
-            bright_a = st.slider("Nuclei Threshold", 0, 255, 50)
-            min_size = st.slider("Min Nuclei Size (px)", 10, 500, 50)
-            
-            use_roi_norm = st.checkbox("Normalize by Tissue Area (ROI)", value=True, key="roi_mode2")
-            current_params_dict.update({"Nuclei Color": target_a, "Nucl Sens": sens_a, "Nucl Bright": bright_a, "Min Size": min_size, "ROI Norm": use_roi_norm})
-            
-            if use_roi_norm:
-                roi_color = st.selectbox("Tissue Color:", list(COLOR_MAP.keys()), index=5, key="roi_col2")
-                sens_roi = st.slider("ROI Sensitivity", 5, 50, 20, key="roi_sens2")
-                bright_roi = st.slider("ROI Brightness", 0, 255, 40, key="roi_bri2")
-                current_params_dict.update({"ROI Color": roi_color, "ROI Sens": sens_roi, "ROI Bright": bright_roi})
+    elif mode.startswith("3."):
+        st.info("💡 Calculates overlap of **CH-A** within **CH-B (Base)** area.")
+        c1, c2 = st.columns(2)
+        with c1:
+            target_b = st.selectbox("CH-B (Base/Denominator):", list(COLOR_MAP.keys()), index=3) 
+            sens_b = st.slider("B Sensitivity (Base)", 5, 50, 20)
+            bright_b = st.slider("B Brightness", 0, 255, 60)
+        with c2:
+            target_a = st.selectbox("CH-A (Target/Numerator):", list(COLOR_MAP.keys()), index=1) 
+            sens_a = st.slider("A Sensitivity (Target)", 5, 50, 20)
+            bright_a = st.slider("A Brightness", 0, 255, 60)
+        
+        min_size = st.slider("Min Cell Size (px, for density)", 10, 500, 50)
+        
+        # Save Parameters
+        current_params_dict.update({
+            "Target_A_Name": CLEAN_NAMES[target_a], "Target_B_Name": CLEAN_NAMES[target_b],
+            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+            f"Param_{CLEAN_NAMES[target_b]}_Sens": sens_b, f"Param_{CLEAN_NAMES[target_b]}_Bright": bright_b,
+            "Param_MinSize_px": min_size
+        })
 
-        elif mode.startswith("3."):
-            c1, c2 = st.columns(2)
-            with c1:
-                target_a = st.selectbox("CH-A:", list(COLOR_MAP.keys()), index=3); sens_a = st.slider("A Sensitivity", 5, 50, 20); bright_a = st.slider("A Brightness", 0, 255, 60)
-            with c2:
-                target_b = st.selectbox("CH-B:", list(COLOR_MAP.keys()), index=2); sens_b = st.slider("B Sensitivity", 5, 50, 20); bright_b = st.slider("B Brightness", 0, 255, 60)
-            current_params_dict.update({"CH-A": target_a, "Sens A": sens_a, "Bright A": bright_a, "CH-B": target_b, "Sens B": sens_b, "Bright B": bright_b})
+    elif mode.startswith("1."):
+        target_a = st.selectbox("Target Color:", list(COLOR_MAP.keys()), index=5)
+        sens_a = st.slider("Sensitivity", 5, 50, 20); bright_a = st.slider("Brightness", 0, 255, 60)
+        min_size = st.slider("Min Cell Size (px, ref count)", 10, 500, 50)
+        use_roi_norm = st.checkbox("ROI Normalization", value=False)
+        
+        current_params_dict.update({
+            "Target_Name": CLEAN_NAMES[target_a],
+            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+            "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
+        })
+        if use_roi_norm:
+            roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
+            sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
+            current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
 
-        elif mode.startswith("4."):
-            target_a = st.selectbox("Origin A:", list(COLOR_MAP.keys()), index=2); target_b = st.selectbox("Target B:", list(COLOR_MAP.keys()), index=3)
-            sens_common = st.slider("Common Sensitivity", 5, 50, 20); bright_common = st.slider("Common Brightness", 0, 255, 60)
-            current_params_dict.update({"Origin A": target_a, "Target B": target_b, "Common Sens": sens_common, "Common Bright": bright_common})
+    elif mode.startswith("2."):
+        target_a = st.selectbox("Nuclei Color:", list(COLOR_MAP.keys()), index=4)
+        sens_a = st.slider("Nuclei Sensitivity", 5, 50, 20); bright_a = st.slider("Nuclei Brightness", 0, 255, 50)
+        min_size = st.slider("Min Nuclei Size", 10, 500, 50)
+        use_roi_norm = st.checkbox("ROI Normalization", value=True)
+        
+        current_params_dict.update({
+            "Target_Name": CLEAN_NAMES[target_a],
+            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+            "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
+        })
+        if use_roi_norm:
+            roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
+            sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
+            current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
+
+    elif mode.startswith("4."):
+        target_a = st.selectbox("Origin A:", list(COLOR_MAP.keys()), index=2); target_b = st.selectbox("Target B:", list(COLOR_MAP.keys()), index=3)
+        sens_common = st.slider("Common Sensitivity", 5, 50, 20); bright_common = st.slider("Common Brightness", 0, 255, 60)
+        min_size = 50 
+        current_params_dict.update({
+            "Target_A_Name": CLEAN_NAMES[target_a], "Target_B_Name": CLEAN_NAMES[target_b],
+            "Param_Common_Sens": sens_common, "Param_Common_Bright": bright_common
+        })
 
     st.divider()
-    # Spatial scale set to 3.0769 (Default)
     scale_val = st.number_input("Spatial Scale (μm/px)", value=3.0769, format="%.4f")
-    current_params_dict["Spatial Scale"] = scale_val
-    current_params_dict["Analysis Mode"] = mode
-    
+    current_params_dict["Param_Scale_um_px"] = scale_val
+    current_params_dict["Analysis_Mode"] = mode
+
     def prepare_next_group():
         st.session_state.uploader_key = str(uuid.uuid4())
 
-    st.button(
-        "📸 Next Group (Clear Images Only)", 
-        on_click=prepare_next_group, 
-        help="Keeps the current analysis history but clears uploaded images to prepare for the next group."
-    )
-    
-    st.divider()
+    st.button("📸 Next Group (Clear Images)", on_click=prepare_next_group)
     if st.button("Clear History & New ID"): 
-        st.session_state.analysis_history = []
-        date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')
-        st.session_state.current_analysis_id = f"AID-{date_str}-{str(uuid.uuid4())[:8]}"
-        st.session_state.uploader_key = str(uuid.uuid4())
-        st.rerun()
+        st.session_state.analysis_history = []; st.rerun()
 
     st.divider()
-    st.markdown("### ⚙️ Traceability (Current Settings)")
-    st.table(pd.DataFrame([current_params_dict]).T)
-    
-    # Audit Log CSV (Settings only)
-    df_params_log = pd.DataFrame([current_params_dict]).T.reset_index()
-    df_params_log.columns = ["Parameter", "Value"]
-    param_filename = f"params_{st.session_state.current_analysis_id}.csv"
-    st.download_button("📥 Download Settings CSV", df_params_log.to_csv(index=False).encode('utf-8-sig'), param_filename, "text/csv")
-
-    st.divider()
-    st.caption("【Disclaimer】")
-    st.caption("This tool is for research purposes only and does not guarantee clinical diagnosis. Final validation is the responsibility of the user.")
+    # CSV Button with UTC filename
+    utc_csv_name = f"Settings_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S_UTC')}.csv"
+    st.download_button("📥 Download Settings Only", pd.DataFrame([current_params_dict]).T.reset_index().to_csv(index=False).encode('utf-8-sig'), utc_csv_name)
 
 # ---------------------------------------------------------
-# 4. Tab 1: Execute Analysis
+# 4. Analysis Execution Process
 # ---------------------------------------------------------
 with tab_main:
-    uploaded_files = st.file_uploader("Upload Images (16-bit TIFF supported)", type=["jpg", "png", "tif", "tiff"], accept_multiple_files=True, key=st.session_state.uploader_key)
+    uploaded_files = st.file_uploader("Upload Images", type=["jpg", "png", "tif", "tiff"], accept_multiple_files=True, key=st.session_state.uploader_key)
     if uploaded_files:
-        st.success(f"Analyzing {len(uploaded_files)} images...")
+        st.success(f"Processing {len(uploaded_files)} images...")
         batch_results = []
         for i, file in enumerate(uploaded_files):
             file.seek(0); file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-            # 16-bit Support: IMREAD_UNCHANGED
             img_raw = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
             
             if img_raw is not None:
-                if group_strategy.startswith("Auto"):
-                    try: detected_group = file.name.split(filename_sep)[0]
-                    except: detected_group = "Unknown"
-                    current_group_label = detected_group
-                else:
-                    current_group_label = sample_group
+                if group_strategy == "Auto extract from filename":
+                    try: current_group_label = file.name.split(filename_sep)[0]
+                    except: current_group_label = "Unknown"
+                else: current_group_label = sample_group
 
-                # Image Processing (Min-Max Normalization to 8bit)
+                # Image Loading & Preprocessing
                 img_f = img_raw.astype(np.float32); mn, mx = np.min(img_f), np.max(img_f)
                 img_8 = ((img_f - mn) / (mx - mn) * 255.0 if mx > mn else np.clip(img_f, 0, 255)).astype(np.uint8)
                 img_bgr = cv2.cvtColor(img_8, cv2.COLOR_GRAY2BGR) if len(img_8.shape) == 2 else img_8[:,:,:3]
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB); img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-                val, unit, res_disp = 0.0, "", img_rgb.copy()
-                h, w = img_rgb.shape[:2]; fov_mm2 = (h * w) * ((scale_val / 1000) ** 2)
-
+                val, unit = 0.0, ""
+                h, w = img_rgb.shape[:2]
+                res_disp = np.zeros_like(img_rgb)
+                
+                # Default Denominator Area (FoV)
+                denominator_area_mm2 = (h * w) * ((scale_val/1000)**2)
+                roi_status = "FoV"
                 extra_data = {}
 
-                # --- Area Fraction Mode (ROI Norm) ---
-                if mode.startswith("1.") or (mode.startswith("5.") and trend_metric.startswith("Area")):
-                    mask_target = get_mask(img_hsv, target_a, sens_a, bright_a)
+                # ----------------------------
+                # Colocalization (Mode 3 & 5)
+                # ----------------------------
+                if mode.startswith("3.") or (mode.startswith("5.") and trend_metric.startswith("Colocalization")):
+                    mask_a = get_mask(img_hsv, target_a, sens_a, bright_a)
+                    mask_b = get_mask(img_hsv, target_b, sens_b, bright_b)
+
+                    # Calculate full metrics for both Denominator/Numerator
+                    metrics_a = calc_metrics(mask_a, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a])
+                    metrics_b = calc_metrics(mask_b, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_b])
+                    extra_data.update(metrics_a); extra_data.update(metrics_b)
+
+                    # Calculate Coloc (CH-B is denominator)
+                    denom_px = cv2.countNonZero(mask_b)
+                    coloc = cv2.bitwise_and(mask_a, mask_b)
+                    val = (cv2.countNonZero(coloc) / denom_px * 100) if denom_px > 0 else 0
+                    unit = "% Coloc"
                     
-                    a_denominator_px = h * w
-                    roi_status = "Field of View"
+                    # Details of the colocalized region itself
+                    metrics_coloc = calc_metrics(coloc, scale_val, denominator_area_mm2, 0, "Coloc_Region")
+                    extra_data.update(metrics_coloc)
+
+                    # Intuitive Display (Draw selected colors)
+                    color_a = DISPLAY_COLORS[target_a]
+                    color_b = DISPLAY_COLORS[target_b]
+                    res_disp[mask_a > 0] = color_a
+                    current_b_pixels = np.zeros_like(res_disp); current_b_pixels[mask_b > 0] = color_b
+                    res_disp = cv2.bitwise_or(res_disp, current_b_pixels)
+
+                # ----------------------------
+                # Area Analysis (Mode 1 & 5)
+                # ----------------------------
+                elif mode.startswith("1.") or (mode.startswith("5.") and trend_metric.startswith("Area")):
+                    mask_target = get_mask(img_hsv, target_a, sens_a, bright_a)
                     final_mask = mask_target
                     
                     if 'use_roi_norm' in locals() and use_roi_norm:
                         mask_roi = get_tissue_mask(img_hsv, roi_color, sens_roi, bright_roi)
-                        # Count only extracted color within tissue
                         final_mask = cv2.bitwise_and(mask_target, mask_roi)
-                        a_denominator_px = cv2.countNonZero(mask_roi)
-                        roi_status = "Inside ROI"
-                        # Draw ROI contour in Red
-                        cv2.drawContours(res_disp, cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], -1, (255,0,0), 3)
+                        roi_status = "ROI"
+                        denominator_area_mm2 = cv2.countNonZero(mask_roi) * ((scale_val/1000)**2)
+                        
+                        extra_data.update(calc_metrics(mask_roi, scale_val, (h*w)*((scale_val/1000)**2), min_size, "ROI_Region"))
+                        roi_conts, _ = cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        cv2.drawContours(res_disp, roi_conts, -1, (100,100,100), 2)
 
+                    metrics_tgt = calc_metrics(final_mask, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a])
+                    extra_data.update(metrics_tgt)
+                    
+                    # Main Value
                     target_px = cv2.countNonZero(final_mask)
-                    val = (target_px / a_denominator_px * 100) if a_denominator_px > 0 else 0
+                    denom_px = cv2.countNonZero(mask_roi) if 'use_roi_norm' in locals() and use_roi_norm else (h*w)
+                    val = (target_px / denom_px * 100) if denom_px > 0 else 0
                     unit = "% Area"
                     
-                    # Display extracted area in Green overlay
-                    res_disp_mask = cv2.cvtColor(final_mask, cv2.COLOR_GRAY2RGB)
-                    res_disp_mask[:,:,0]=0; res_disp_mask[:,:,2]=0
-                    res_disp = cv2.addWeighted(res_disp, 0.7, res_disp_mask, 0.3, 0)
-                    
-                    a_target_mm2 = a_denominator_px * ((scale_val/1000)**2)
-                    extra_data = {
-                        "Target Area(mm2)": round(a_target_mm2, 6),
-                        "Norm Basis": roi_status
-                    }
+                    res_disp[final_mask > 0] = DISPLAY_COLORS[target_a]
+                    extra_data["Normalization_Base"] = roi_status
 
-                # --- Nuclei Count Mode (ROI Norm & Color Select) ---
+                # ----------------------------
+                # Count Analysis (Mode 2)
+                # ----------------------------
                 elif mode.startswith("2."):
-                    # Improved: Extract nuclei using specified color mask (Supports HE/IHC)
                     mask_nuclei = get_mask(img_hsv, target_a, sens_a, bright_a)
                     
-                    # Morphology to separate nuclei
-                    kernel = np.ones((3,3), np.uint8)
-                    mask_nuclei = cv2.morphologyEx(mask_nuclei, cv2.MORPH_OPEN, kernel)
-                    
-                    cnts, _ = cv2.findContours(mask_nuclei, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    valid = [c for c in cnts if cv2.contourArea(c) > min_size]; val, unit = len(valid), "cells"
-                    cv2.drawContours(res_disp, valid, -1, (0,255,0), 2)
-                    
-                    a_target_mm2 = fov_mm2
-                    roi_status = "Field of View"
-                    
-                    if 'use_roi_norm' in locals() and use_roi_norm:
+                    if use_roi_norm:
                         mask_roi = get_tissue_mask(img_hsv, roi_color, sens_roi, bright_roi)
-                        roi_px = cv2.countNonZero(mask_roi)
-                        a_target_mm2 = roi_px * ((scale_val/1000)**2)
-                        roi_status = "Inside ROI"
-                        # Draw ROI contour in Red
-                        cv2.drawContours(res_disp, cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], -1, (255,0,0), 3)
+                        denominator_area_mm2 = cv2.countNonZero(mask_roi) * ((scale_val/1000)**2)
+                        roi_status = "ROI"
+                        extra_data.update(calc_metrics(mask_roi, scale_val, (h*w)*((scale_val/1000)**2), min_size, "ROI_Region"))
+                        roi_conts, _ = cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        cv2.drawContours(res_disp, roi_conts, -1, (100,100,100), 2)
 
-                    density = val / a_target_mm2 if a_target_mm2 > 0 else 0
-                    extra_data = {
-                        "Target Area(mm2)": round(a_target_mm2, 6),
-                        "Density(cells/mm2)": round(density, 2),
-                        "Norm Basis": roi_status
-                    }
+                    if use_roi_norm:
+                        mask_nuclei = cv2.bitwise_and(mask_nuclei, mask_roi)
 
-                # --- Other Modes ---
-                elif mode.startswith("3.") or (mode.startswith("5.") and trend_metric.startswith("Colocalization")):
-                    mask_a = get_mask(img_hsv, target_a, sens_a, bright_a); mask_b = get_mask(img_hsv, target_b, sens_b, bright_b)
-                    coloc = cv2.bitwise_and(mask_a, mask_b); denom = cv2.countNonZero(mask_a)
-                    val = (cv2.countNonZero(coloc) / denom * 100) if denom > 0 else 0; unit = "% Coloc"; res_disp = cv2.merge([mask_b, mask_a, np.zeros_like(mask_a)])
+                    metrics_nuc = calc_metrics(mask_nuclei, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a])
+                    extra_data.update(metrics_nuc)
+                    
+                    val = metrics_nuc[f"{CLEAN_NAMES[target_a]}_Count"]
+                    unit = "cells"
+                    
+                    kernel = np.ones((3,3), np.uint8)
+                    mask_disp = cv2.morphologyEx(mask_nuclei, cv2.MORPH_OPEN, kernel)
+                    cnts, _ = cv2.findContours(mask_disp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    valid = [c for c in cnts if cv2.contourArea(c) > min_size]
+                    cv2.drawContours(res_disp, valid, -1, DISPLAY_COLORS[target_a], 2)
+                    
+                    extra_data["Normalization_Base"] = roi_status
+
+                # ----------------------------
+                # Distance Analysis (Mode 4)
+                # ----------------------------
                 elif mode.startswith("4."):
-                    ma, mb = get_mask(img_hsv, target_a, sens_common, bright_common), get_mask(img_hsv, target_b, sens_common, bright_common)
+                    ma = get_mask(img_hsv, target_a, sens_common, bright_common)
+                    mb = get_mask(img_hsv, target_b, sens_common, bright_common)
+                    extra_data.update(calc_metrics(ma, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a]))
+                    extra_data.update(calc_metrics(mb, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_b]))
+                    
                     pa, pb = get_centroids(ma), get_centroids(mb)
-                    if pa and pb: val = np.mean([np.min([np.linalg.norm(a - b) for b in pb]) for a in pa]) * (scale_val if scale_val > 0 else 1)
-                    unit = "μm Dist" if scale_val > 0 else "px Dist"; res_disp = cv2.addWeighted(img_rgb, 0.6, cv2.merge([ma, mb, np.zeros_like(ma)]), 0.4, 0)
+                    if pa and pb: val = np.mean([np.min([np.linalg.norm(a - b) for b in pb]) for a in pa]) * scale_val
+                    unit = "μm"
+                    res_disp = cv2.addWeighted(img_rgb, 0.5, cv2.merge([ma, mb, np.zeros_like(ma)]), 0.5, 0)
 
+                # --- Results UI ---
                 st.divider()
-                st.markdown(f"### 📷 Image {i+1}: {file.name}")
-                st.markdown(f"**Detected Group:** `{current_group_label}`")
+                st.markdown(f"**Image:** `{file.name}`")
                 
-                # Detailed Result Display
-                if "Density(cells/mm2)" in extra_data:
-                    c_m1, c_m2, c_m3 = st.columns(3)
-                    c_m1.metric("Count", f"{int(val)} cells")
-                    c_m2.metric("Cell Density", f"{int(extra_data['Density(cells/mm2)']):,} /mm²")
-                    c_m3.caption(f"Area: {extra_data['Target Area(mm2)']:.4f} mm² ({extra_data['Norm Basis']})")
-                elif "Target Area(mm2)" in extra_data:
-                    c_m1, c_m2 = st.columns(2)
-                    c_m1.metric("Fraction", f"{val:.2f} %")
-                    c_m2.caption(f"Denom. Area: {extra_data['Target Area(mm2)']:.4f} mm² ({extra_data['Norm Basis']})")
-                else:
-                    st.markdown(f"### Result: **{val:.2f} {unit}**")
+                m_cols = st.columns(4)
+                m_cols[0].metric(f"Result ({unit})", f"{val:.2f}")
                 
-                c1, c2 = st.columns(2); c1.image(img_rgb, caption="Raw Image"); c2.image(res_disp, caption="Analysis Result")
+                # Dynamic Metrics Display
+                tgt_name = CLEAN_NAMES[target_a]
+                if f"{tgt_name}_Density_per_mm2" in extra_data:
+                    m_cols[1].metric(f"{tgt_name} Density", f"{extra_data[f'{tgt_name}_Density_per_mm2']} /mm²")
                 
-                # Build Result Data (Including Parameters)
+                if "Coloc_Region_Area_mm2" in extra_data:
+                    m_cols[2].metric("Coloc Area", f"{extra_data['Coloc_Region_Area_mm2']} mm²")
+                elif f"{tgt_name}_Area_mm2" in extra_data:
+                    m_cols[2].metric(f"{tgt_name} Area", f"{extra_data[f'{tgt_name}_Area_mm2']} mm²")
+
+                if "Normalization_Base" in extra_data:
+                    m_cols[3].metric("Norm Base", extra_data["Normalization_Base"])
+
+                with st.expander("📊 View All Calculated Metrics"):
+                    st.json(extra_data)
+
+                c1, c2 = st.columns(2)
+                c1.image(img_rgb, caption="Raw Image")
+                c2.image(res_disp, caption="Analysis Result (Color Corrected)")
+
+                # Data Storage (UTC Timestamp)
+                utc_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                 row_data = {
-                    "Software Version": SOFTWARE_VERSION,
-                    "Analysis ID": st.session_state.current_analysis_id,
-                    "Analysis Date (UTC)": datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
-                    "Filename": file.name,
-                    "Group": current_group_label,
-                    "Measured Value": val,
-                    "Unit": unit,
+                    "File_Name": file.name, "Group": current_group_label, "Main_Value": val, "Unit": unit, 
+                    "Analysis_ID": st.session_state.current_analysis_id,
+                    "Timestamp_UTC": utc_timestamp
                 }
-                if extra_data: row_data.update(extra_data)
-                # ★ Bind parameters strictly ★
+                row_data.update(extra_data)
                 row_data.update(current_params_dict)
-                
                 batch_results.append(row_data)
         
-        if st.button("Commit Batch Data", type="primary"):
+        if st.button("Commit Data", type="primary"):
             st.session_state.analysis_history.extend(batch_results)
-            st.success("Data added to history. Analysis ID maintained.")
-            st.rerun()
+            st.success("Saved Successfully"); st.rerun()
 
+    # CSV Output (UTC Filename)
     if st.session_state.analysis_history:
         st.divider()
-        st.header("💾 CSV Export (Full Traceability)")
         df_exp = pd.DataFrame(st.session_state.analysis_history)
-        st.dataframe(df_exp, use_container_width=True)
-        utc_filename = f"quantified_data_{st.session_state.current_analysis_id}.csv"
-        st.download_button("📥 Download Results CSV", df_exp.to_csv(index=False).encode('utf-8-sig'), utc_filename)
+        st.dataframe(df_exp)
+        
+        # UTC-based Filename Generation
+        utc_filename = f"QuantData_{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M%S_UTC')}.csv"
+        st.download_button("📥 Result CSV (UTC)", df_exp.to_csv(index=False).encode('utf-8-sig'), utc_filename)
 
 # ---------------------------------------------------------
-# 5. Tab 2: Performance Validation
+# 5. Validation (Full Restoration)
 # ---------------------------------------------------------
 with tab_val:
     st.header("🏆 Performance Validation Summary")
@@ -440,8 +510,7 @@ with tab_val:
         m2.metric("Linearity (R²)", f"{r2:.4f}")
         m3.metric("Validated Images", "3,200+")
 
-        st.divider()
-        st.subheader("📈 1. Counting Performance & Linearity (W1 vs W2)")
+        st.subheader("1. Linearity Evaluation")
         fig1, ax1 = plt.subplots(figsize=(10, 5))
         ax1.plot([0, 110], [0, 110], 'k--', alpha=0.3, label='Ideal Line')
         ax1.scatter(df_lin['Ground Truth'], df_lin['Value'], color='#1f77b4', s=100, label='W1 (Nuclei)', zorder=5)
@@ -449,7 +518,7 @@ with tab_val:
         ax1.scatter(w2_lin['Ground Truth'], w2_lin['Value'], color='#ff7f0e', s=100, marker='D', label='W2 (Cytoplasm)', zorder=5)
         z = np.polyfit(df_lin['Ground Truth'], df_lin['Value'], 1)
         ax1.plot(df_lin['Ground Truth'], np.poly1d(z)(df_lin['Ground Truth']), '#1f77b4', alpha=0.5, label='W1 Reg')
-        ax1.set_xlabel('Ground Truth'); ax1.set_ylabel('Measured Value'); ax1.legend(); ax1.grid(True, alpha=0.3)
+        ax1.set_xlabel('Ground Truth (Theoretical)'); ax1.set_ylabel('Measured Value'); ax1.legend(); ax1.grid(True, alpha=0.3)
         st.pyplot(fig1)
 
         st.divider()
