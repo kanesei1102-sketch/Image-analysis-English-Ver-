@@ -12,7 +12,7 @@ import uuid
 # 0. Page Config & Constants
 # ---------------------------------------------------------
 st.set_page_config(page_title="Bio-Image Quantifier V2 (EN)", layout="wide")
-SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.02 (UTC-Standard)"
+SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.04 (EN/BugFix)"
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = str(uuid.uuid4())
@@ -146,7 +146,7 @@ df_val = load_validation_data()
 # 3. UI Framework
 # ---------------------------------------------------------
 st.title("🔬 Bio-Image Quantifier: Pro Edition (English)")
-st.caption(f"{SOFTWARE_VERSION}: UTC-Compliant Data Integrity System")
+st.caption(f"{SOFTWARE_VERSION}: BugFix & Visual Improvements")
 st.sidebar.markdown(f"**Analysis ID (UTC):**\n`{st.session_state.current_analysis_id}`")
 
 tab_main, tab_val = st.tabs(["🚀 Run Analysis", "🏆 Performance Validation"])
@@ -162,6 +162,14 @@ with st.sidebar:
     ])
 
     st.divider()
+
+    # --- Visual Settings (New!) ---
+    st.markdown("### 👁️ Visual Settings")
+    high_contrast = st.checkbox("High Contrast (Green Contours)", value=True, help="Draws detected regions in bright green. Recommended for HE/DAB images where original colors are hard to distinguish.")
+    overlay_opacity = st.slider("Overlay Opacity", 0.1, 1.0, 0.4, help="Transparency of the area fill overlay.")
+    
+    st.divider()
+
     st.markdown("### 🏷️ Grouping Settings")
     group_strategy = st.radio("Grouping Strategy:", ["Auto extract from filename", "Manual Input"])
     
@@ -287,12 +295,22 @@ with st.sidebar:
     current_params_dict["Param_Scale_um_px"] = scale_val
     current_params_dict["Analysis_Mode"] = mode
 
+    # --- Button Logic ---
     def prepare_next_group():
         st.session_state.uploader_key = str(uuid.uuid4())
 
+    def clear_all_history():
+        st.session_state.analysis_history = []
+        # ★ Fix: Reset uploader key to clear images
+        st.session_state.uploader_key = str(uuid.uuid4())
+        # Generate new Analysis ID
+        utc_now = datetime.datetime.now(datetime.timezone.utc)
+        date_str = utc_now.strftime('%Y%m%d-%H%M%S')
+        unique_suffix = str(uuid.uuid4())[:6]
+        st.session_state.current_analysis_id = f"AID-{date_str}-UTC-{unique_suffix}"
+
     st.button("📸 Next Group (Clear Images)", on_click=prepare_next_group)
-    if st.button("Clear History & New ID"): 
-        st.session_state.analysis_history = []; st.rerun()
+    st.button("Clear History & New ID", on_click=clear_all_history)
 
     st.divider()
     # CSV Button with UTC filename
@@ -322,14 +340,19 @@ with tab_main:
                 img_8 = ((img_f - mn) / (mx - mn) * 255.0 if mx > mn else np.clip(img_f, 0, 255)).astype(np.uint8)
                 img_bgr = cv2.cvtColor(img_8, cv2.COLOR_GRAY2BGR) if len(img_8.shape) == 2 else img_8[:,:,:3]
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB); img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
+                
+                # ★ Base for display is now the Original Image (Fixed from black background)
+                res_disp = img_rgb.copy()
+                
                 val, unit = 0.0, ""
                 h, w = img_rgb.shape[:2]
-                res_disp = np.zeros_like(img_rgb)
-                
-                # Default Denominator Area (FoV)
                 denominator_area_mm2 = (h * w) * ((scale_val/1000)**2)
                 roi_status = "FoV"
                 extra_data = {}
+
+                # Helper to determine draw color
+                def get_draw_color(target_name):
+                    return (0, 255, 0) if high_contrast else DISPLAY_COLORS[target_name]
 
                 # ----------------------------
                 # Colocalization (Mode 3 & 5)
@@ -353,12 +376,12 @@ with tab_main:
                     metrics_coloc = calc_metrics(coloc, scale_val, denominator_area_mm2, 0, "Coloc_Region")
                     extra_data.update(metrics_coloc)
 
-                    # Intuitive Display (Draw selected colors)
-                    color_a = DISPLAY_COLORS[target_a]
-                    color_b = DISPLAY_COLORS[target_b]
-                    res_disp[mask_a > 0] = color_a
-                    current_b_pixels = np.zeros_like(res_disp); current_b_pixels[mask_b > 0] = color_b
-                    res_disp = cv2.bitwise_or(res_disp, current_b_pixels)
+                    # Overlay drawing
+                    overlay = img_rgb.copy()
+                    color_a = get_draw_color(target_a)
+                    overlay[coloc > 0] = color_a 
+                    res_disp = cv2.addWeighted(overlay, overlay_opacity, img_rgb, 1 - overlay_opacity, 0)
+                    cv2.drawContours(res_disp, cv2.findContours(coloc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], -1, color_a, 2)
 
                 # ----------------------------
                 # Area Analysis (Mode 1 & 5)
@@ -386,7 +409,11 @@ with tab_main:
                     val = (target_px / denom_px * 100) if denom_px > 0 else 0
                     unit = "% Area"
                     
-                    res_disp[final_mask > 0] = DISPLAY_COLORS[target_a]
+                    # Transparent Overlay
+                    overlay = img_rgb.copy()
+                    draw_col = get_draw_color(target_a)
+                    overlay[final_mask > 0] = draw_col
+                    res_disp = cv2.addWeighted(overlay, overlay_opacity, img_rgb, 1 - overlay_opacity, 0)
                     extra_data["Normalization_Base"] = roi_status
 
                 # ----------------------------
@@ -400,11 +427,8 @@ with tab_main:
                         denominator_area_mm2 = cv2.countNonZero(mask_roi) * ((scale_val/1000)**2)
                         roi_status = "ROI"
                         extra_data.update(calc_metrics(mask_roi, scale_val, (h*w)*((scale_val/1000)**2), min_size, "ROI_Region"))
-                        roi_conts, _ = cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                        cv2.drawContours(res_disp, roi_conts, -1, (100,100,100), 2)
-
-                    if use_roi_norm:
                         mask_nuclei = cv2.bitwise_and(mask_nuclei, mask_roi)
+                        cv2.drawContours(res_disp, cv2.findContours(mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], -1, (100,100,100), 2)
 
                     metrics_nuc = calc_metrics(mask_nuclei, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a])
                     extra_data.update(metrics_nuc)
@@ -412,11 +436,14 @@ with tab_main:
                     val = metrics_nuc[f"{CLEAN_NAMES[target_a]}_Count"]
                     unit = "cells"
                     
+                    # Count Drawing (Contours on original image)
                     kernel = np.ones((3,3), np.uint8)
                     mask_disp = cv2.morphologyEx(mask_nuclei, cv2.MORPH_OPEN, kernel)
                     cnts, _ = cv2.findContours(mask_disp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     valid = [c for c in cnts if cv2.contourArea(c) > min_size]
-                    cv2.drawContours(res_disp, valid, -1, DISPLAY_COLORS[target_a], 2)
+                    
+                    draw_col = get_draw_color(target_a)
+                    cv2.drawContours(res_disp, valid, -1, draw_col, 2)
                     
                     extra_data["Normalization_Base"] = roi_status
 
@@ -432,7 +459,12 @@ with tab_main:
                     pa, pb = get_centroids(ma), get_centroids(mb)
                     if pa and pb: val = np.mean([np.min([np.linalg.norm(a - b) for b in pb]) for a in pa]) * scale_val
                     unit = "μm"
-                    res_disp = cv2.addWeighted(img_rgb, 0.5, cv2.merge([ma, mb, np.zeros_like(ma)]), 0.5, 0)
+                    
+                    # Overlay drawing
+                    overlay = img_rgb.copy()
+                    overlay[ma > 0] = get_draw_color(target_a)
+                    overlay[mb > 0] = get_draw_color(target_b)
+                    res_disp = cv2.addWeighted(overlay, 0.5, img_rgb, 0.5, 0)
 
                 # --- Results UI ---
                 st.divider()
