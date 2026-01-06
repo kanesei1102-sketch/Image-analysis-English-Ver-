@@ -12,7 +12,7 @@ import uuid
 # 0. Page Config & Constants
 # ---------------------------------------------------------
 st.set_page_config(page_title="Bio-Image Quantifier V2 (EN)", layout="wide")
-SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.04 (EN/BugFix)"
+SOFTWARE_VERSION = "Bio-Image Quantifier Pro v2026.05 (EN/Param-Fix)"
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = str(uuid.uuid4())
@@ -146,7 +146,7 @@ df_val = load_validation_data()
 # 3. UI Framework
 # ---------------------------------------------------------
 st.title("🔬 Bio-Image Quantifier: Pro Edition (English)")
-st.caption(f"{SOFTWARE_VERSION}: BugFix & Visual Improvements")
+st.caption(f"{SOFTWARE_VERSION}: Standardized CSV Columns")
 st.sidebar.markdown(f"**Analysis ID (UTC):**\n`{st.session_state.current_analysis_id}`")
 
 tab_main, tab_val = st.tabs(["🚀 Run Analysis", "🏆 Performance Validation"])
@@ -205,10 +205,11 @@ with st.sidebar:
                 sens_a = st.slider("A Sensitivity", 5, 50, 20); bright_a = st.slider("A Brightness", 0, 255, 60)
             
             min_size = st.slider("Min Cell Size (px)", 10, 500, 50)
-            # [Important] Save parameters with intuitive keys
+            
+            # Param Names: Standardized for A and B
             current_params_dict.update({
-                f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
-                f"Param_{CLEAN_NAMES[target_b]}_Sens": sens_b, f"Param_{CLEAN_NAMES[target_b]}_Bright": bright_b,
+                "Param_A_Name": CLEAN_NAMES[target_a], "Param_A_Sens": sens_a, "Param_A_Bright": bright_a,
+                "Param_B_Name": CLEAN_NAMES[target_b], "Param_B_Sens": sens_b, "Param_B_Bright": bright_b,
                 "Param_MinSize_px": min_size
             })
         else:
@@ -219,13 +220,14 @@ with st.sidebar:
             use_roi_norm = st.checkbox("ROI Normalization", value=False)
             
             current_params_dict.update({
-                f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+                "Param_Target_Name": CLEAN_NAMES[target_a],
+                "Param_Sensitivity": sens_a, "Param_Brightness": bright_a,
                 "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
             })
             if use_roi_norm:
                 roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
                 sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
-                current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
+                current_params_dict.update({"Param_ROI_Name": CLEAN_NAMES[roi_color], "Param_ROI_Sens": sens_roi, "Param_ROI_Bright": bright_roi})
 
     elif mode.startswith("3."):
         st.info("💡 Calculates overlap of **CH-A** within **CH-B (Base)** area.")
@@ -241,11 +243,10 @@ with st.sidebar:
         
         min_size = st.slider("Min Cell Size (px, for density)", 10, 500, 50)
         
-        # Save Parameters
+        # Save Parameters (Standardized A/B keys)
         current_params_dict.update({
-            "Target_A_Name": CLEAN_NAMES[target_a], "Target_B_Name": CLEAN_NAMES[target_b],
-            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
-            f"Param_{CLEAN_NAMES[target_b]}_Sens": sens_b, f"Param_{CLEAN_NAMES[target_b]}_Bright": bright_b,
+            "Param_A_Name": CLEAN_NAMES[target_a], "Param_A_Sens": sens_a, "Param_A_Bright": bright_a,
+            "Param_B_Name": CLEAN_NAMES[target_b], "Param_B_Sens": sens_b, "Param_B_Bright": bright_b,
             "Param_MinSize_px": min_size
         })
 
@@ -255,15 +256,16 @@ with st.sidebar:
         min_size = st.slider("Min Cell Size (px, ref count)", 10, 500, 50)
         use_roi_norm = st.checkbox("ROI Normalization", value=False)
         
+        # Standardized Keys
         current_params_dict.update({
-            "Target_Name": CLEAN_NAMES[target_a],
-            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+            "Param_Target_Name": CLEAN_NAMES[target_a],
+            "Param_Sensitivity": sens_a, "Param_Brightness": bright_a,
             "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
         })
         if use_roi_norm:
             roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
             sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
-            current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
+            current_params_dict.update({"Param_ROI_Name": CLEAN_NAMES[roi_color], "Param_ROI_Sens": sens_roi, "Param_ROI_Bright": bright_roi})
 
     elif mode.startswith("2."):
         target_a = st.selectbox("Nuclei Color:", list(COLOR_MAP.keys()), index=4)
@@ -271,22 +273,23 @@ with st.sidebar:
         min_size = st.slider("Min Nuclei Size", 10, 500, 50)
         use_roi_norm = st.checkbox("ROI Normalization", value=True)
         
+        # ★ FIXED: Standardized Keys for Nuclei Mode (No dynamic color names in keys)
         current_params_dict.update({
-            "Target_Name": CLEAN_NAMES[target_a],
-            f"Param_{CLEAN_NAMES[target_a]}_Sens": sens_a, f"Param_{CLEAN_NAMES[target_a]}_Bright": bright_a,
+            "Param_Target_Name": CLEAN_NAMES[target_a],
+            "Param_Sensitivity": sens_a, "Param_Brightness": bright_a,
             "Param_ROI_Norm": use_roi_norm, "Param_MinSize_px": min_size
         })
         if use_roi_norm:
             roi_color = st.selectbox("ROI Color:", list(COLOR_MAP.keys()), index=5)
             sens_roi = st.slider("ROI Sensitivity", 5, 50, 20); bright_roi = st.slider("ROI Brightness", 0, 255, 40)
-            current_params_dict.update({f"Param_ROI_{CLEAN_NAMES[roi_color]}_Sens": sens_roi, f"Param_ROI_{CLEAN_NAMES[roi_color]}_Bright": bright_roi})
+            current_params_dict.update({"Param_ROI_Name": CLEAN_NAMES[roi_color], "Param_ROI_Sens": sens_roi, "Param_ROI_Bright": bright_roi})
 
     elif mode.startswith("4."):
         target_a = st.selectbox("Origin A:", list(COLOR_MAP.keys()), index=2); target_b = st.selectbox("Target B:", list(COLOR_MAP.keys()), index=3)
         sens_common = st.slider("Common Sensitivity", 5, 50, 20); bright_common = st.slider("Common Brightness", 0, 255, 60)
         min_size = 50 
         current_params_dict.update({
-            "Target_A_Name": CLEAN_NAMES[target_a], "Target_B_Name": CLEAN_NAMES[target_b],
+            "Param_A_Name": CLEAN_NAMES[target_a], "Param_B_Name": CLEAN_NAMES[target_b],
             "Param_Common_Sens": sens_common, "Param_Common_Bright": bright_common
         })
 
@@ -301,7 +304,6 @@ with st.sidebar:
 
     def clear_all_history():
         st.session_state.analysis_history = []
-        # ★ Fix: Reset uploader key to clear images
         st.session_state.uploader_key = str(uuid.uuid4())
         # Generate new Analysis ID
         utc_now = datetime.datetime.now(datetime.timezone.utc)
@@ -341,7 +343,7 @@ with tab_main:
                 img_bgr = cv2.cvtColor(img_8, cv2.COLOR_GRAY2BGR) if len(img_8.shape) == 2 else img_8[:,:,:3]
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB); img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
                 
-                # ★ Base for display is now the Original Image (Fixed from black background)
+                # Base for display is Original Image
                 res_disp = img_rgb.copy()
                 
                 val, unit = 0.0, ""
@@ -350,7 +352,6 @@ with tab_main:
                 roi_status = "FoV"
                 extra_data = {}
 
-                # Helper to determine draw color
                 def get_draw_color(target_name):
                     return (0, 255, 0) if high_contrast else DISPLAY_COLORS[target_name]
 
@@ -366,13 +367,13 @@ with tab_main:
                     metrics_b = calc_metrics(mask_b, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_b])
                     extra_data.update(metrics_a); extra_data.update(metrics_b)
 
-                    # Calculate Coloc (CH-B is denominator)
+                    # Calculate Coloc
                     denom_px = cv2.countNonZero(mask_b)
                     coloc = cv2.bitwise_and(mask_a, mask_b)
                     val = (cv2.countNonZero(coloc) / denom_px * 100) if denom_px > 0 else 0
                     unit = "% Coloc"
                     
-                    # Details of the colocalized region itself
+                    # Details of the colocalized region
                     metrics_coloc = calc_metrics(coloc, scale_val, denominator_area_mm2, 0, "Coloc_Region")
                     extra_data.update(metrics_coloc)
 
@@ -403,13 +404,11 @@ with tab_main:
                     metrics_tgt = calc_metrics(final_mask, scale_val, denominator_area_mm2, min_size, CLEAN_NAMES[target_a])
                     extra_data.update(metrics_tgt)
                     
-                    # Main Value
                     target_px = cv2.countNonZero(final_mask)
                     denom_px = cv2.countNonZero(mask_roi) if 'use_roi_norm' in locals() and use_roi_norm else (h*w)
                     val = (target_px / denom_px * 100) if denom_px > 0 else 0
                     unit = "% Area"
                     
-                    # Transparent Overlay
                     overlay = img_rgb.copy()
                     draw_col = get_draw_color(target_a)
                     overlay[final_mask > 0] = draw_col
